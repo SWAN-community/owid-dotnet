@@ -25,53 +25,22 @@ namespace Owid.Client
 {
     public static class CryptoExtensions
     {
-		private static readonly HttpClient _client = new HttpClient(
+		/// <summary>
+		/// Handlers used with HTTP clients to automatically decompress any
+		/// compressed data streams.
+		/// </summary>
+		private static readonly HttpClientHandler _handler =
 			new HttpClientHandler()
 			{
 				AutomaticDecompression =
 					DecompressionMethods.GZip | DecompressionMethods.Deflate
-			});
-
-		private static readonly Model.Owid[] Empty = new Model.Owid[] { };
-
-		public static void Sign(
-			this Model.Owid owid,
-			RSACryptoServiceProvider rsa)
-        {
-			owid.SignWithOthers(rsa, Empty);
-		}
-
-		public static void Sign(
-			this Model.Owid owid,
-			RSACryptoServiceProvider rsa,
-			params Model.Owid[] others)
-		{
-			owid.SignWithOthers(rsa, others);
-		}
-
-		public static void SignWithOthers(
-			this Model.Owid owid, 
-			RSACryptoServiceProvider rsa,  
-			Model.Owid[] others)
-        {
-			var data = owid.GetDataForCrypto(others);
-			owid.Signature = rsa.SignData(
-				data,
-				HashAlgorithmName.SHA256,
-				RSASignaturePadding.Pkcs1);
-			if (owid.Signature.Length != Constants.SignatureLength)
-            {
-				throw new Exception(
-					$@"Signatures must be '{Constants.SignatureLength}' " +
-					"bytes");
-            }
-		}
+			};
 
 		public static async Task<bool> VerifyAsync(this Model.Owid owid)
 		{
 			using (var rsa = await owid.GetPublicKey("https"))
 			{
-				return await owid.VerifyAsync(rsa, Empty);
+				return await owid.VerifyAsync(rsa, Constants.Empty);
 			}
 		}
 
@@ -79,7 +48,7 @@ namespace Owid.Client
 			this Model.Owid owid,
 			RSACryptoServiceProvider rsa)
         {
-			return await owid.VerifyAsyncWithOthers(rsa, Empty);
+			return await owid.VerifyAsyncWithOthers(rsa, Constants.Empty);
 		}
 
 		public static async Task<bool> VerifyAsync(
@@ -120,7 +89,7 @@ namespace Owid.Client
 		/// <param name="owid"></param>
 		/// <param name="others"></param>
 		/// <returns></returns>
-		private static byte[] GetDataForCrypto(
+		internal static byte[] GetDataForCrypto(
 			this Model.Owid owid, 
 			Model.Owid[] others)
         {
@@ -150,20 +119,26 @@ namespace Owid.Client
         {
             // Construct the URL to get the public key.
             UriBuilder u = new UriBuilder(
-				scheme,
+                scheme,
                 owid.Domain);
             u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
-			u.Query = "format=pkcs";
+            u.Query = "format=pkcs";
 
-			// Get the public key from the OWID provider.
-			var response = await _client.GetAsync(u.Uri);
-			response.EnsureSuccessStatusCode();
-			var publicKey = await response.Content.ReadAsStringAsync();
+            // Create the RSA provider with the public key associated with the
+			// OWID.
+            var rsaKey = new RSACryptoServiceProvider();
+            rsaKey.ImportFromPem(await GetPublicKey(u.Uri));
+            return rsaKey;
+        }
 
-			// Create the public key.
-			var rsaKey = new RSACryptoServiceProvider();
-			rsaKey.ImportFromPem(publicKey);
-			return rsaKey;
-		}
+		/// <summary>
+		/// Get the public key from the domain contained in the OWID.
+		/// </summary>
+		/// <param name="u"></param>
+		/// <returns></returns>
+        private static async Task<string> GetPublicKey(Uri u)
+        {
+            return await new HttpClient(_handler).GetStringAsync(u);
+        }
     }
 }

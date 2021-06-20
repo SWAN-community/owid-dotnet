@@ -20,6 +20,10 @@ namespace Owid.Client
 {
     internal static class Constants
     {
+		/// <summary>
+		/// The base data for OWIDs. The date and time information is stored
+		/// in hours or minutes after this date.
+		/// </summary>
 		internal static readonly DateTime BaseDate = new DateTime(
 			2020, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
 
@@ -27,5 +31,11 @@ namespace Owid.Client
 		/// The length of an OWID signature in bytes. 
 		/// </summary>
 		internal const int SignatureLength = 64;
+
+		/// <summary>
+		/// Used when cryptographic operations are required where there is no
+		/// other data to be considered.
+		/// </summary>
+		internal static readonly Model.Owid[] Empty = new Model.Owid[] { };
 	}
 }

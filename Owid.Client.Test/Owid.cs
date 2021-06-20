@@ -26,6 +26,7 @@ namespace Owid.Client.Test
     public class Owid
     {
         private const string TestText = "Hello World";
+        private const string TestDomain = "test.com";
 
         private string PublicPEM;
         private string PrivatePEM;
@@ -84,13 +85,13 @@ namespace Owid.Client.Test
         private Model.Owid CreateOwid()
         {
             var owid = new Model.Owid();
-            using (var createRsa = new RSACryptoServiceProvider())
+            using (var rsa = new RSACryptoServiceProvider())
             {
-                createRsa.ImportFromPem(PrivatePEM);
-                owid.Domain = "test.com";
+                rsa.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, rsa);
                 owid.Date = DateTime.UtcNow;
                 owid.Payload = ASCIIEncoding.ASCII.GetBytes(TestText);
-                owid.Sign(createRsa);
+                creator.Sign(owid);
             }
             return owid;
         }

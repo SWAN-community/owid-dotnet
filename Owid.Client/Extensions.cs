@@ -14,7 +14,6 @@
  * under the License.
  * ***************************************************************************/
 
-using Microsoft.AspNetCore.WebUtilities;
 using Owid.Client.Model;
 using System;
 using System.Collections.Generic;
@@ -40,7 +39,7 @@ namespace Owid.Client
 
 		public static string AsBase64(this Model.Owid owid)
 		{
-			return Base64UrlTextEncoder.Encode(owid.AsByteArray());
+			return Convert.ToBase64String(owid.AsByteArray());
 		}
 
 		public static void EmptyToBuffer(BinaryWriter writer)

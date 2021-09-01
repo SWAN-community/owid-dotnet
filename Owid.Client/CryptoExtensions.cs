@@ -15,6 +15,7 @@
  * ***************************************************************************/
 
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -36,9 +37,19 @@ namespace Owid.Client
 					DecompressionMethods.GZip | DecompressionMethods.Deflate
 			};
 
+		/// <summary>
+		/// Cache used to avoid repeat requests for the same public keys.
+		/// </summary>
+		private static readonly ConcurrentDictionary<
+			Uri,
+			WeakReference<string>> _publicKeyCache = 
+			new ConcurrentDictionary<
+				Uri, 
+				WeakReference<string>>();
+
 		public static async Task<bool> VerifyAsync(this Model.Owid owid)
 		{
-			using (var rsa = await owid.GetPublicKey("https"))
+			using (var rsa = owid.GetPublicKey("https"))
 			{
 				return await owid.VerifyAsync(rsa, Constants.Empty);
 			}
@@ -55,7 +66,7 @@ namespace Owid.Client
 			this Model.Owid owid,
 			params Model.Owid[] others)
 		{
-			using (var rsa = await owid.GetPublicKey("https"))
+			using (var rsa = owid.GetPublicKey("https"))
 			{
 				return await owid.VerifyAsyncWithOthers(rsa, others);
 			}
@@ -113,7 +124,7 @@ namespace Owid.Client
 		/// <param name="owid"></param>
 		/// <param name="scheme"></param>
 		/// <returns></returns>
-		private static async Task<RSACryptoServiceProvider> GetPublicKey(
+		private static RSACryptoServiceProvider GetPublicKey(
 			this Model.Owid owid,
 			string scheme)
         {
@@ -124,21 +135,35 @@ namespace Owid.Client
             u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
             u.Query = "format=pkcs";
 
-            // Create the RSA provider with the public key associated with the
+			// Create the RSA provider with the public key associated with the
 			// OWID.
-            var rsaKey = new RSACryptoServiceProvider();
-            rsaKey.ImportFromPem(await GetPublicKey(u.Uri));
-            return rsaKey;
+			var rsaKey = new RSACryptoServiceProvider();
+			rsaKey.ImportFromPem(GetPublicKey(u.Uri));
+			return rsaKey;
         }
 
 		/// <summary>
-		/// Get the public key from the domain contained in the OWID.
+		/// Get the public key from the domain contained in the OWID if it is 
+		/// not already contained in the cache.
 		/// </summary>
 		/// <param name="u"></param>
 		/// <returns></returns>
-        private static async Task<string> GetPublicKey(Uri u)
+        private static string GetPublicKey(Uri u)
         {
-            return await new HttpClient(_handler).GetStringAsync(u);
+			string publicKey;
+			var publicKeyRef = _publicKeyCache.GetOrAdd(
+				u,
+				(u) =>
+				{
+					return new WeakReference<string>(new HttpClient(
+						_handler).GetStringAsync(u).Result);
+				});
+            if (publicKeyRef.TryGetTarget(out publicKey) == false)
+            {
+				publicKey = new HttpClient(_handler).GetStringAsync(u).Result;
+				publicKeyRef.SetTarget(publicKey);
+			}
+			return publicKey;
         }
     }
 }

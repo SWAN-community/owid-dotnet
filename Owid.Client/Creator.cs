@@ -17,6 +17,7 @@
 using Owid.Client.Model.Configuration;
 using System;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Owid.Client
 {
@@ -52,11 +53,22 @@ namespace Owid.Client
             RSA = rsa;
         }
 
+        /// <summary>
+        /// Sign the OWID provided.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <returns></returns>
         public Model.Owid Sign(Model.Owid owid)
         {
             return SignWithOthers(owid, Constants.Empty);
         }
 
+        /// <summary>
+        /// Sign the OWID provided AND the other OWIDs provided.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
         public Model.Owid Sign(
             Model.Owid owid,
             params Model.Owid[] others)
@@ -64,6 +76,12 @@ namespace Owid.Client
             return SignWithOthers(owid, others);
         }
 
+        /// <summary>
+        /// Sign the OWID provided AND the other OWIDs provided.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
         public Model.Owid SignWithOthers(
             Model.Owid owid,
             Model.Owid[] others)
@@ -82,6 +100,30 @@ namespace Owid.Client
                     "bytes");
             }
             return owid;
+        }
+
+        /// <summary>
+        /// Create a new OWID for the creator containing the value as the 
+        /// payload.
+        /// </summary>
+        /// <param name="value">Payload value</param>
+        /// <returns>Signed OWID with payload provided.</returns>
+        public Model.Owid Sign(string value)
+        {
+            return Sign(ASCIIEncoding.ASCII.GetBytes(value));
+        }
+
+        /// <summary>
+        /// Create a new OWID for the creator containing the value as the 
+        /// payload.
+        /// </summary>
+        /// <param name="value">Payload value</param>
+        /// <returns>Signed OWID with payload provided.</returns>
+        public Model.Owid Sign(byte[] value)
+        {
+            var owid = new Model.Owid();
+            owid.Payload = value;
+            return Sign(owid);
         }
 
         private static void ValidateRsa(RSACryptoServiceProvider rsa)

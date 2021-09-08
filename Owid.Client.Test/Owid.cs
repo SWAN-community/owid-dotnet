@@ -34,23 +34,21 @@ namespace Owid.Client.Test
         [TestInitialize]
         public void TestInitialize()
         {
-            using (var rsa = new RSACryptoServiceProvider(512))
+            using (var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256))
             {
-                var parameters = rsa.ExportParameters(true);
-                var pubKeyBytes = rsa.ExportSubjectPublicKeyInfo();
-                var privKeyBytes = rsa.ExportPkcs8PrivateKey();
+                var parameters = crypto.ExportParameters(true);
+                var pubKeyBytes = crypto.ExportSubjectPublicKeyInfo();
+                var privKeyBytes = crypto.ExportPkcs8PrivateKey();
                 PublicPEM = new String(PemEncoding.Write("PUBLIC KEY", pubKeyBytes));
                 PrivatePEM = new String(PemEncoding.Write("PRIVATE KEY", privKeyBytes));
             }
-            using (var pub = new RSACryptoServiceProvider())
+            using (var pub = ECDsa.Create())
             {
                 pub.ImportFromPem(PublicPEM);
-                Assert.IsTrue(pub.PublicOnly);
             }
-            using (var priv = new RSACryptoServiceProvider())
+            using (var priv = ECDsa.Create())
             {
                 priv.ImportFromPem(PrivatePEM);
-                Assert.IsFalse(priv.PublicOnly);
             }
         }
 
@@ -62,7 +60,7 @@ namespace Owid.Client.Test
             Assert.IsNotNull(original);
 
             // Verify the OWID with the public key.
-            using (var rsa = new RSACryptoServiceProvider(512))
+            using (var rsa = ECDsa.Create())
             {
                 rsa.ImportFromPem(PublicPEM);
                 Assert.IsTrue(await original.VerifyAsync(rsa));
@@ -75,20 +73,20 @@ namespace Owid.Client.Test
             var copy = new Model.Owid(owidString);
 
             // Verify the copy OWID with the public key.
-            using (var rsa = new RSACryptoServiceProvider())
+            using (var crypto = ECDsa.Create())
             {
-                rsa.ImportFromPem(PublicPEM);
-                Assert.IsTrue(await copy.VerifyAsync(rsa));
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(await copy.VerifyAsync(crypto));
             }
         }
 
         private Model.Owid CreateOwid()
         {
             var owid = new Model.Owid();
-            using (var rsa = new RSACryptoServiceProvider())
+            using (var crypto = ECDsa.Create())
             {
-                rsa.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, rsa);
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
                 owid.Date = DateTime.UtcNow;
                 owid.Payload = ASCIIEncoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid);

@@ -26,9 +26,9 @@ namespace Owid.Client.Model
     public class Owid
     {
 		/// <summary>
-		// The byte version of the OWID. Version 1 only.
+		// The byte version of the OWID.
 		/// </summary>
-		public OwidVersion Version { get; set; } = OwidVersion.Version2;
+		public OwidVersion Version { get; set; } = OwidVersion.Version3;
 
 		/// <summary>
 		/// Domain associated with the creator.
@@ -74,8 +74,12 @@ namespace Owid.Client.Model
 						break;
 					case OwidVersion.Version1:
 					case OwidVersion.Version2:
+					case OwidVersion.Version3:
 						this.FromBuffer(reader);
 						break;
+					default:
+						throw new Exception(
+							@$"OWID version '{Version}' invalid");
 				}
 			}
         }

@@ -36,21 +36,21 @@ namespace Owid.Client
         /// <summary>
         /// Used to sign OWIDs from this creator.
         /// </summary>
-        public RSACryptoServiceProvider RSA { get; }
+        public ECDsa Crypto { get; }
 
         public Creator(OwidConfiguration configuration)
         {
             Domain = configuration.Domain;
-            RSA = new RSACryptoServiceProvider(512);
-            RSA.ImportFromPem(configuration.PrivateKey);
-            ValidateRsa(RSA);
+            Crypto = ECDsa.Create();
+            Crypto.ImportFromPem(configuration.PrivateKey);
+            ValidateCrypto(Crypto);
         }
 
-        public Creator(string domain, RSACryptoServiceProvider rsa)
+        public Creator(string domain, ECDsa crypto)
         {
             Domain = domain;
-            ValidateRsa(rsa);
-            RSA = rsa;
+            ValidateCrypto(crypto);
+            Crypto = crypto;
         }
 
         /// <summary>
@@ -89,10 +89,11 @@ namespace Owid.Client
             owid.Domain = Domain;
             owid.Date = DateTime.UtcNow;
             var data = owid.GetDataForCrypto(others);
-            owid.Signature = RSA.SignData(
+            owid.Signature = Crypto.SignData(
                 data,
-                HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1);
+                0,
+                data.Length,
+                HashAlgorithmName.SHA256);
             if (owid.Signature.Length != Constants.SignatureLength)
             {
                 throw new Exception(
@@ -126,14 +127,21 @@ namespace Owid.Client
             return Sign(owid);
         }
 
-        private static void ValidateRsa(RSACryptoServiceProvider rsa)
+        private static void ValidateCrypto(ECDsa crypto)
         {
-            if (rsa.PublicOnly)
+            var test = new Span<byte>();
+            var written = 0;
+            if (crypto.TrySignData(
+                new byte[] { 0 }, 
+                test, 
+                HashAlgorithmName.SHA256, 
+                out written) == false || 
+                written == 0)
             {
                 throw new ArgumentException(
-                    "RSACryptoServiceProvider must support private signing" +
+                    "ECDsa provider must support private signing " +
                     "to be used with Creator",
-                    "rsa");
+                    "crypto");
             }
         }
     }

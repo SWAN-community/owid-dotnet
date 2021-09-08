@@ -87,9 +87,12 @@ namespace Owid.Client
 				case OwidVersion.Version1:
 					return ReadDateV1(reader);
 				case OwidVersion.Version2:
+				case OwidVersion.Version3:
 					return ReadDateV2(reader);
+				default:
+					throw new Exception(
+						@$"OWID version '{version}' not supported");
 			}
-			return null;
 		}
 
 		private static DateTime ReadDateV2(BinaryReader reader)
@@ -156,10 +159,12 @@ namespace Owid.Client
 					owid.WriteDateV1(writer);
 					return;
 				case OwidVersion.Version2:
+				case OwidVersion.Version3:
 					owid.WriteDateV2(writer);
 					return;
 				default:
-					throw new Exception("Version not supported");
+					throw new Exception(
+						@$"OWID version '{owid.Version}' not supported");
 			}
 		}
 

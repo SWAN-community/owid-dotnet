@@ -49,48 +49,47 @@ namespace Owid.Client
 
 		public static async Task<bool> VerifyAsync(this Model.Owid owid)
 		{
-			using (var rsa = owid.GetPublicKey("https"))
+			using (var crypto = owid.GetPublicKey("https"))
 			{
-				return await owid.VerifyAsync(rsa, Constants.Empty);
+				return await owid.VerifyAsync(crypto, Constants.Empty);
 			}
 		}
 
 		public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
-			RSACryptoServiceProvider rsa)
+			ECDsa crypto)
         {
-			return await owid.VerifyAsyncWithOthers(rsa, Constants.Empty);
+			return await owid.VerifyAsyncWithOthers(crypto, Constants.Empty);
 		}
 
 		public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
 			params Model.Owid[] others)
 		{
-			using (var rsa = owid.GetPublicKey("https"))
+			using (var crypto = owid.GetPublicKey("https"))
 			{
-				return await owid.VerifyAsyncWithOthers(rsa, others);
+				return await owid.VerifyAsyncWithOthers(crypto, others);
 			}
 		}
 
 		public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
-			RSACryptoServiceProvider rsa,
+			ECDsa crypto,
 			params Model.Owid[] others)
         {
-			return await owid.VerifyAsyncWithOthers(rsa, others);
+			return await owid.VerifyAsyncWithOthers(crypto, others);
 		}
 
 		public static Task<bool> VerifyAsyncWithOthers(
 			this Model.Owid owid,
-			RSACryptoServiceProvider rsa,
+			ECDsa crypto,
 			Model.Owid[] others)
 		{
 			var data = owid.GetDataForCrypto(others);
-			return Task.Run(() => rsa.VerifyData(
+			return Task.Run(() => crypto.VerifyData(
 				data,
 				owid.Signature,
-				HashAlgorithmName.SHA256,
-				RSASignaturePadding.Pkcs1));
+				HashAlgorithmName.SHA256));
 		}
 
 		/// <summary>
@@ -124,7 +123,7 @@ namespace Owid.Client
 		/// <param name="owid"></param>
 		/// <param name="scheme"></param>
 		/// <returns></returns>
-		private static RSACryptoServiceProvider GetPublicKey(
+		private static ECDsa GetPublicKey(
 			this Model.Owid owid,
 			string scheme)
         {
@@ -135,11 +134,11 @@ namespace Owid.Client
             u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
             u.Query = "format=pkcs";
 
-			// Create the RSA provider with the public key associated with the
-			// OWID.
-			var rsaKey = new RSACryptoServiceProvider();
-			rsaKey.ImportFromPem(GetPublicKey(u.Uri));
-			return rsaKey;
+			// Create the ECDsa provider with the public key associated with
+			// the OWID.
+			var key = ECDsa.Create();
+			key.ImportFromPem(GetPublicKey(u.Uri));
+			return key;
         }
 
 		/// <summary>

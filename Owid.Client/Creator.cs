@@ -14,7 +14,6 @@
  * under the License.
  * ***************************************************************************/
 
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Owid.Client.Model.Configuration;
 using System;
 using System.Security.Cryptography;
@@ -62,6 +61,12 @@ namespace Owid.Client
         /// <param name="crypto">
         /// Crypto provider for signing <see cref="Owid"/>/-s.
         /// </param>
+        /// <exception cref="ArgumentException">
+        ///   <paramref name="crypto" />'s <see cref="HashAlgorithmName.Name" /> is an empty string.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        ///   <paramref name="crypto" />'s <see cref="HashAlgorithmName.Name" /> is <see langword="null" />.
+        /// </exception>
         public Creator(string domain, ECDsa crypto)
         {
             Domain = domain;
@@ -150,10 +155,6 @@ namespace Owid.Client
                 [0],
                 test,
                 HashAlgorithmName.SHA256);
-            Assert.IsTrue(written > 0,
-                "ECDsa provider must support private signing " +
-                "to be used with Creator",
-                "crypto");
         }
     }
 }

@@ -16,11 +16,29 @@
 
 namespace Owid.Client.Model
 {
+	/// <summary>
+	/// A version of <see cref="Owid"/> data.
+	/// </summary>
     public enum OwidVersion
 	{
+		/// <summary>
+		/// Represents an empty <see cref="Owid"/>.
+		/// </summary>
 		Empty = 0,
+
+		/// <summary>
+		/// Version 1.
+		/// </summary>
 		Version1 = 1,
-		Version2 = 2,
-		Version3 = 3
+
+        /// <summary>
+        /// Version 2.
+        /// </summary>
+        Version2 = 2,
+
+        /// <summary>
+        /// Version 3.
+        /// </summary>
+        Version3 = 3,
 	}
 }

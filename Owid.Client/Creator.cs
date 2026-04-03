@@ -39,6 +39,12 @@ namespace Owid.Client
         /// </summary>
         public ECDsa Crypto { get; }
 
+        /// <summary>
+        /// Make new <see cref="Owid"/> from config.
+        /// </summary>
+        /// <param name="configuration">
+        /// Configuration to use.
+        /// </param>
         public Creator(OwidConfiguration configuration)
         {
             Domain = configuration.Domain;
@@ -47,6 +53,15 @@ namespace Owid.Client
             ValidateCrypto(Crypto);
         }
 
+        /// <summary>
+        /// Make new <see cref="Owid"/>.
+        /// </summary>
+        /// <param name="domain">
+        /// Web domain to be used.
+        /// </param>
+        /// <param name="crypto">
+        /// Crypto provider for signing <see cref="Owid"/>/-s.
+        /// </param>
         public Creator(string domain, ECDsa crypto)
         {
             Domain = domain;

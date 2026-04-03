@@ -26,7 +26,7 @@ namespace Owid.Client.Model
     public class Owid
     {
 		/// <summary>
-		// The byte version of the OWID.
+		/// The byte version of the OWID.
 		/// </summary>
 		public OwidVersion Version { get; set; } = OwidVersion.Version3;
 
@@ -56,14 +56,23 @@ namespace Owid.Client.Model
 		/// </summary>
 		public byte[] Signature { get; set; }
 
+		/// <summary>
+		/// Make empty <see cref="Owid"/>
+		/// </summary>
 		public Owid() { }
 
-		public Owid(string value)
+        /// <summary>
+        /// Make <see cref="Owid"/> from Base64-encoded string.
+        /// </summary>
+        public Owid(string value)
 			: this (Convert.FromBase64String(value))
         {
         }
 
-		public Owid(byte[] buffer)
+        /// <summary>
+        /// Make <see cref="Owid"/> from binary data.
+        /// </summary>
+        public Owid(byte[] buffer)
         {
 			using (var stream = new MemoryStream(buffer))
 			using (var reader = new BinaryReader(stream))
@@ -84,6 +93,7 @@ namespace Owid.Client.Model
 			}
         }
 
+		/// <inheritdoc/>
         public override string ToString()
         {
             return this.AsBase64();

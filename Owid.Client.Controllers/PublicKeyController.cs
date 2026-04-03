@@ -4,6 +4,10 @@ using Owid.Client.Model.Configuration;
 
 namespace Owid.Client.Controllers
 {
+    /// <summary>
+    /// API controller to enable verification
+    /// of <see cref="Owid"/> signatures.
+    /// </summary>
     [Route("[controller]/api/v1")]
     [Route("[controller]/api/v2")]
     [ApiController]
@@ -11,6 +15,10 @@ namespace Owid.Client.Controllers
     {
         private readonly OwidConfiguration _owidConfiguration;
 
+        /// <summary>
+        /// Designated constructor.
+        /// </summary>
+        /// <param name="owidConfiguration"></param>
         public OwidController(OwidConfiguration owidConfiguration)
         {
             _owidConfiguration = owidConfiguration;

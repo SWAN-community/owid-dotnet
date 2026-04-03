@@ -1,5 +1,9 @@
 namespace Owid.Client.Model.Configuration
 { 
+    /// <summary>
+    /// Configuration for <see cref="Creator"/>
+    /// to make new <see cref="Owid"/>s with.
+    /// </summary>
     public class OwidConfiguration
     {
         /// <summary>

@@ -2,10 +2,43 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Owid.Client</AssemblyName>
+    <Platforms>AnyCPU</Platforms>
+    <DocumentationFile>Owid.Client.xml</DocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet package properties -->
+    <PackageId>Owid.Client</PackageId>
+    <Title>OWID Client - Open Web Id library for .NET</Title>
+    <PackageDescription>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</PackageDescription>
+    <Authors>51Degrees Engineering</Authors>
+    <PackageLicenseExpression>EUPL-1.2</PackageLicenseExpression>
+    <PackageIconUrl>https://github.com/SWAN-community/owid/raw/main/images/owl.128.pxls.100.dpi.png</PackageIconUrl>
+    <Copyright>51Degrees Mobile Experts Limited</Copyright>
+    <PackageTags>owid,open-web-id,cryptographic,identifiers,51degrees,swan</PackageTags>
+    <RepositoryUrl>https://github.com/51Degrees/owid-dotnet</RepositoryUrl>
+    <PackageIcon>owl-logo.png</PackageIcon>
+    <PackageProjectUrl>https://51degrees.com</PackageProjectUrl>
+    <Description>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</Description>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en</NeutralLanguage>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="MSTest.TestFramework" Version="2.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\Images\owl-logo.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

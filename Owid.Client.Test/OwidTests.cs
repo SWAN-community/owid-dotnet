@@ -22,8 +22,11 @@ using System.Threading.Tasks;
 
 namespace Owid.Client.Test
 {
+    /// <summary>
+    /// Tests for <see cref="Owid"/> and <see cref="Creator"/>.
+    /// </summary>
     [TestClass]
-    public class Owid
+    public class OwidTests
     {
         private const string TestText = "Hello World";
         private const string TestDomain = "test.com";
@@ -31,6 +34,9 @@ namespace Owid.Client.Test
         private string PublicPEM;
         private string PrivatePEM;
 
+        /// <summary>
+        /// Initialize the test.
+        /// </summary>
         [TestInitialize]
         public void TestInitialize()
         {
@@ -52,6 +58,10 @@ namespace Owid.Client.Test
             }
         }
 
+        /// <summary>
+        /// Test <see cref="Owid"/> creation.
+        /// </summary>
+        /// <returns></returns>
         [TestMethod]
         public async Task TestCreate()
         {

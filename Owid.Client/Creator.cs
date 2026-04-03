@@ -44,8 +44,13 @@ namespace Owid.Client
         /// <param name="configuration">
         /// Configuration to use.
         /// </param>
+        /// <exception cref="ArithmeticException">
+        /// <paramref name="configuration"/>.<see cref="OwidConfiguration.Domain"/> is empty or whitespace.
+        /// </exception>
         public Creator(OwidConfiguration configuration)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(
+                configuration.Domain);
             Domain = configuration.Domain;
             Crypto = ECDsa.Create();
             Crypto.ImportFromPem(configuration.PrivateKey);

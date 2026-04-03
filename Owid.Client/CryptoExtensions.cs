@@ -184,7 +184,6 @@ namespace Owid.Client
 		/// <returns></returns>
         private static string GetPublicKey(Uri u)
         {
-			string publicKey;
 			var publicKeyRef = _publicKeyCache.GetOrAdd(
 				u,
 				(u) =>
@@ -192,7 +191,7 @@ namespace Owid.Client
 					return new WeakReference<string>(new HttpClient(
 						_handler).GetStringAsync(u).Result);
 				});
-            if (publicKeyRef.TryGetTarget(out publicKey) == false)
+            if (publicKeyRef.TryGetTarget(out var publicKey) == false)
             {
 				publicKey = new HttpClient(_handler).GetStringAsync(u).Result;
 				publicKeyRef.SetTarget(publicKey);

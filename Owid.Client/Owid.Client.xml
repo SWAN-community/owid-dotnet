@@ -45,6 +45,9 @@
             <param name="configuration">
             Configuration to use.
             </param>
+            <exception cref="T:System.ArithmeticException">
+            <paramref name="configuration"/>.<see cref="P:Owid.Client.Model.Configuration.OwidConfiguration.Domain"/> is empty or whitespace.
+            </exception>
         </member>
         <member name="M:Owid.Client.Creator.#ctor(System.String,System.Security.Cryptography.ECDsa)">
             <summary>

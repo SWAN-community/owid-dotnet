@@ -31,8 +31,8 @@ namespace Owid.Client.Test
         private const string TestText = "Hello World";
         private const string TestDomain = "test.com";
 
-        private string PublicPEM;
-        private string PrivatePEM;
+        private string? PublicPEM;
+        private string? PrivatePEM;
 
         /// <summary>
         /// Initialize the test.

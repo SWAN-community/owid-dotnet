@@ -8,6 +8,7 @@
     <DocumentationFile>Owid.Client.Controllers.xml</DocumentationFile>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
 
     <!-- NuGet package properties -->
     <PackageId>Owid.Client.Controllers</PackageId>

@@ -14,6 +14,7 @@
  * under the License.
  * ***************************************************************************/
 
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Owid.Client.Model.Configuration;
 using System;
 using System.Security.Cryptography;
@@ -129,20 +130,15 @@ namespace Owid.Client
 
         private static void ValidateCrypto(ECDsa crypto)
         {
-            var test = new Span<byte>();
-            var written = 0;
-            if (crypto.TrySignData(
-                new byte[] { 0 }, 
-                test, 
-                HashAlgorithmName.SHA256, 
-                out written) == false || 
-                written == 0)
-            {
-                throw new ArgumentException(
-                    "ECDsa provider must support private signing " +
-                    "to be used with Creator",
-                    "crypto");
-            }
+            var test = new byte[128];
+            var written = crypto.SignData(
+                [0],
+                test,
+                HashAlgorithmName.SHA256);
+            Assert.IsTrue(written > 0,
+                "ECDsa provider must support private signing " +
+                "to be used with Creator",
+                "crypto");
         }
     }
 }

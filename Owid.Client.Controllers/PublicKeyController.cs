@@ -31,7 +31,7 @@ namespace Owid.Client.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public string GetPublicKey()
+        public string? GetPublicKey()
         {
             return _owidConfiguration.PublicKey;
         }
@@ -44,7 +44,7 @@ namespace Owid.Client.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [HttpGet("creator")]
         [HttpPost("creator")]
-        public string GetCreator()
+        public string? GetCreator()
         {
             return _owidConfiguration.Domain;
         }

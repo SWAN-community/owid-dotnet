@@ -7,6 +7,7 @@
     <DocumentationFile>Owid.Client.xml</DocumentationFile>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
 
     <!-- NuGet package properties -->
     <PackageId>Owid.Client</PackageId>

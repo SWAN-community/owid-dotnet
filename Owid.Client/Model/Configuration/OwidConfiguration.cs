@@ -11,16 +11,16 @@ namespace Owid.Client.Model.Configuration
         /// points to provide public keys and other information needed to 
         /// conform to the OWID specification.
         /// </summary>
-        public string Domain { get; set; }
+        public string? Domain { get; set; }
 
         /// <summary>
         /// The PEM format private key for the OWID creator.
         /// </summary>
-        public string PrivateKey { get; set; }
+        public string? PrivateKey { get; set; }
 
         /// <summary>
         /// The PEM format public key for the OWID creator.
         /// </summary>
-        public string PublicKey { get; set; }
+        public string? PublicKey { get; set; }
     }
 }

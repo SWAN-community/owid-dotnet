@@ -1,0 +1,27 @@
+name: Nightly Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryrun:
+        required: false
+        type: boolean
+        default: false
+  # schedule:
+  # # * is a special character in YAML so quote this string
+  #    - cron:  '0 0 * * *'
+     
+jobs:
+  Nightly-Package-Update:
+    uses: ./.github/workflows/nightly-package-update.yml
+    secrets: inherit
+
+  Nightly-PRs-To-Main:
+    needs: [Nightly-Package-Update]
+    uses: ./.github/workflows/nightly-prs-to-main.yml
+    secrets: inherit
+    
+  Nightly-Publish-Main:
+    needs: Nightly-PRs-To-Main
+    uses: ./.github/workflows/nightly-publish-main.yml
+    secrets: inherit

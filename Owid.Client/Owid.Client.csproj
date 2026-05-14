@@ -13,14 +13,8 @@
     <PackageId>Owid.Client</PackageId>
     <Title>OWID Client - Open Web Id library for .NET</Title>
     <PackageDescription>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</PackageDescription>
-    <Authors>51Degrees Engineering</Authors>
-    <PackageLicenseExpression>EUPL-1.2</PackageLicenseExpression>
     <PackageIconUrl>https://github.com/SWAN-community/owid/raw/main/images/owl.128.pxls.100.dpi.png</PackageIconUrl>
-    <Copyright>51Degrees Mobile Experts Limited</Copyright>
-    <PackageTags>owid,open-web-id,cryptographic,identifiers,51degrees,swan</PackageTags>
-    <RepositoryUrl>https://github.com/51Degrees/owid-dotnet</RepositoryUrl>
     <PackageIcon>owl-logo.png</PackageIcon>
-    <PackageProjectUrl>https://51degrees.com</PackageProjectUrl>
     <Description>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</Description>
     <RepositoryType>git</RepositoryType>
     <NeutralLanguage>en</NeutralLanguage>

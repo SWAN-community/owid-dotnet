@@ -1,5 +1,5 @@
 ﻿/* ****************************************************************************
- * Copyright 2021 51 Degrees Mobile Experts Limited (51degrees.com)
+ * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.
@@ -38,14 +38,40 @@ namespace Owid.Client
         /// </summary>
         public ECDsa Crypto { get; }
 
+        /// <summary>
+        /// Make new <see cref="Owid"/> from config.
+        /// </summary>
+        /// <param name="configuration">
+        /// Configuration to use.
+        /// </param>
+        /// <exception cref="ArithmeticException">
+        /// <paramref name="configuration"/>.<see cref="OwidConfiguration.Domain"/> is empty or whitespace.
+        /// </exception>
         public Creator(OwidConfiguration configuration)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(
+                configuration.Domain);
             Domain = configuration.Domain;
             Crypto = ECDsa.Create();
             Crypto.ImportFromPem(configuration.PrivateKey);
             ValidateCrypto(Crypto);
         }
 
+        /// <summary>
+        /// Make new <see cref="Owid"/>.
+        /// </summary>
+        /// <param name="domain">
+        /// Web domain to be used.
+        /// </param>
+        /// <param name="crypto">
+        /// Crypto provider for signing <see cref="Owid"/>/-s.
+        /// </param>
+        /// <exception cref="ArgumentException">
+        ///   <paramref name="crypto" />'s <see cref="HashAlgorithmName.Name" /> is an empty string.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        ///   <paramref name="crypto" />'s <see cref="HashAlgorithmName.Name" /> is <see langword="null" />.
+        /// </exception>
         public Creator(string domain, ECDsa crypto)
         {
             Domain = domain;
@@ -129,20 +155,11 @@ namespace Owid.Client
 
         private static void ValidateCrypto(ECDsa crypto)
         {
-            var test = new Span<byte>();
-            var written = 0;
-            if (crypto.TrySignData(
-                new byte[] { 0 }, 
-                test, 
-                HashAlgorithmName.SHA256, 
-                out written) == false || 
-                written == 0)
-            {
-                throw new ArgumentException(
-                    "ECDsa provider must support private signing " +
-                    "to be used with Creator",
-                    "crypto");
-            }
+            var test = new byte[128];
+            var written = crypto.SignData(
+                [0],
+                test,
+                HashAlgorithmName.SHA256);
         }
     }
 }

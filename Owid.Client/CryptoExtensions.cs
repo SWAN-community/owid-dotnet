@@ -1,5 +1,5 @@
 ﻿/* ****************************************************************************
- * Copyright 2021 51 Degrees Mobile Experts Limited (51degrees.com)
+ * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.
@@ -24,6 +24,10 @@ using System.Threading.Tasks;
 
 namespace Owid.Client
 {
+	/// <summary>
+	/// Extensions methods for crypto operations
+	/// on <see cref="Owid"/> instances.
+	/// </summary>
     public static class CryptoExtensions
     {
 		/// <summary>
@@ -47,6 +51,11 @@ namespace Owid.Client
 				Uri, 
 				WeakReference<string>>();
 
+		/// <summary>
+		/// Verify that <see cref="Owid"/> signature is correct.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <returns></returns>
 		public static async Task<bool> VerifyAsync(this Model.Owid owid)
 		{
 			using (var crypto = owid.GetPublicKey("https"))
@@ -55,14 +64,26 @@ namespace Owid.Client
 			}
 		}
 
-		public static async Task<bool> VerifyAsync(
+        /// <summary>
+        /// Verify that <see cref="Owid"/> signature is correct.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="crypto"></param>
+        /// <returns></returns>
+        public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
 			ECDsa crypto)
         {
 			return await owid.VerifyAsyncWithOthers(crypto, Constants.Empty);
 		}
 
-		public static async Task<bool> VerifyAsync(
+        /// <summary>
+        /// Verify that <see cref="Owid"/> signature is correct.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
+        public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
 			params Model.Owid[] others)
 		{
@@ -72,7 +93,14 @@ namespace Owid.Client
 			}
 		}
 
-		public static async Task<bool> VerifyAsync(
+        /// <summary>
+        /// Verify that <see cref="Owid"/> signature is correct.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="crypto"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
+        public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
 			ECDsa crypto,
 			params Model.Owid[] others)
@@ -80,7 +108,14 @@ namespace Owid.Client
 			return await owid.VerifyAsyncWithOthers(crypto, others);
 		}
 
-		public static Task<bool> VerifyAsyncWithOthers(
+        /// <summary>
+        /// Verify that <see cref="Owid"/> signature is correct.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="crypto"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
+        public static Task<bool> VerifyAsyncWithOthers(
 			this Model.Owid owid,
 			ECDsa crypto,
 			Model.Owid[] others)
@@ -149,7 +184,6 @@ namespace Owid.Client
 		/// <returns></returns>
         private static string GetPublicKey(Uri u)
         {
-			string publicKey;
 			var publicKeyRef = _publicKeyCache.GetOrAdd(
 				u,
 				(u) =>
@@ -157,7 +191,7 @@ namespace Owid.Client
 					return new WeakReference<string>(new HttpClient(
 						_handler).GetStringAsync(u).Result);
 				});
-            if (publicKeyRef.TryGetTarget(out publicKey) == false)
+            if (publicKeyRef.TryGetTarget(out var publicKey) == false)
             {
 				publicKey = new HttpClient(_handler).GetStringAsync(u).Result;
 				publicKeyRef.SetTarget(publicKey);

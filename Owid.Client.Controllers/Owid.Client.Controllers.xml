@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Owid.Client.Controllers</name>
+    </assembly>
+    <members>
+        <member name="T:Owid.Client.Controllers.OwidController">
+            <summary>
+            API controller to enable verification
+            of <see cref="N:Owid"/> signatures.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
+            <summary>
+            Designated constructor.
+            </summary>
+            <param name="owidConfiguration"></param>
+        </member>
+        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey">
+            <summary>
+            Returns the public key for the OWID creator.
+            </summary>
+            <returns></returns>
+        </member>
+        <member name="M:Owid.Client.Controllers.OwidController.GetCreator">
+            <summary>
+            Returns the public key for the OWID creator.
+            </summary>
+            <returns></returns>
+        </member>
+    </members>
+</doc>

@@ -1,5 +1,5 @@
 ﻿/* ****************************************************************************
- * Copyright 2021 51 Degrees Mobile Experts Limited (51degrees.com)
+ * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.
@@ -23,8 +23,16 @@ using System.Text;
 
 namespace Owid.Client
 {
+	/// <summary>
+	/// Extensions methods for <see cref="Owid"/>.
+	/// </summary>
     public static class Extensions
     {
+		/// <summary>
+		/// Converts <see cref="Owid"/> to byte array.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <returns></returns>
 		public static byte[] AsByteArray(this Model.Owid owid)
 		{
 			using (var stream = new MemoryStream())
@@ -37,22 +45,43 @@ namespace Owid.Client
 			}
 		}
 
-		public static string AsBase64(this Model.Owid owid)
+        /// <summary>
+        /// Converts <see cref="Owid"/> to Base64-encoded string.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <returns></returns>
+        public static string AsBase64(this Model.Owid owid)
 		{
 			return Convert.ToBase64String(owid.AsByteArray());
 		}
 
+		/// <summary>
+		/// Writes empty <see cref="Owid"/> to <paramref name="writer"/>.
+		/// </summary>
+		/// <param name="writer"></param>
 		public static void EmptyToBuffer(BinaryWriter writer)
 		{
 			writer.Write((byte)OwidVersion.Empty);
 		}
 
-		public static void ToBuffer(this Model.Owid owid, BinaryWriter writer)
+        /// <summary>
+        /// Writes <paramref name="owid"/> to <paramref name="writer"/>
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="writer"></param>
+        public static void ToBuffer(this Model.Owid owid, BinaryWriter writer)
 		{
 			owid.ToBufferNoSignature(writer);
 			WriteSignature(writer, owid.Signature);
 		}
 
+		/// <summary>
+		/// Reads <see cref="Owid"/> data
+		/// from <paramref name="reader"/>.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <param name="reader"></param>
+		/// <exception cref="Exception"></exception>
 		public static void FromBuffer(
 			this Model.Owid owid, 
 			BinaryReader reader)

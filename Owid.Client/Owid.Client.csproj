@@ -1,7 +1,35 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net5.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Owid.Client</AssemblyName>
+    <Platforms>AnyCPU</Platforms>
+    <DocumentationFile>Owid.Client.xml</DocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
+
+    <!-- NuGet package properties -->
+    <PackageId>Owid.Client</PackageId>
+    <Title>OWID Client - Open Web Id library for .NET</Title>
+    <PackageDescription>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</PackageDescription>
+    <PackageIconUrl>https://github.com/SWAN-community/owid/raw/main/images/owl.128.pxls.100.dpi.png</PackageIconUrl>
+    <PackageIcon>owl-logo.png</PackageIcon>
+    <Description>Open Web Id (OWID) - Simple cryptographically auditable identifiers and processors implemented in .NET. This package contains the core OWID client components.</Description>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en</NeutralLanguage>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\Images\owl-logo.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+  </ItemGroup>
 
 </Project>

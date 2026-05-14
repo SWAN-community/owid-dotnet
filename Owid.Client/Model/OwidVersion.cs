@@ -1,5 +1,5 @@
 ﻿/* ****************************************************************************
- * Copyright 2021 51 Degrees Mobile Experts Limited (51degrees.com)
+ * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.
@@ -16,11 +16,29 @@
 
 namespace Owid.Client.Model
 {
+	/// <summary>
+	/// A version of <see cref="Owid"/> data.
+	/// </summary>
     public enum OwidVersion
 	{
+		/// <summary>
+		/// Represents an empty <see cref="Owid"/>.
+		/// </summary>
 		Empty = 0,
+
+		/// <summary>
+		/// Version 1.
+		/// </summary>
 		Version1 = 1,
-		Version2 = 2,
-		Version3 = 3
+
+        /// <summary>
+        /// Version 2.
+        /// </summary>
+        Version2 = 2,
+
+        /// <summary>
+        /// Version 3.
+        /// </summary>
+        Version3 = 3,
 	}
 }

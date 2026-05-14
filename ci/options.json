@@ -1,0 +1,13 @@
+[
+    {
+        "Image": "ubuntu-latest",
+        "Name": "Ubuntu_AnyCPU_Release",
+        "Configuration": "Release",
+        "Arch": "Any CPU",
+        "Language": "dotnet",
+        "LanguageVersion": "10.0.x",
+        "PackageRequirement" : true,
+        "SkipUpdateTag": true,
+        "RunPerformance": false
+    }
+]

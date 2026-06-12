@@ -132,11 +132,16 @@ The controller then responds to `/owid/api/v1/public-key`,
 dotnet test
 ```
 
+The tests cover creation, signing, verification, serialization, chaining and
+the controllers. They also verify fixtures signed by the Rust and Go
+implementations to prove cross-language compatibility.
+
 ## Related repositories
 
 - [owid](https://github.com/SWAN-community/owid) for the specification and concepts
 - [owid-go](https://github.com/SWAN-community/owid-go) for the Go implementation
 - [owid-js](https://github.com/SWAN-community/owid-js) for the JavaScript implementation
+- [owid-rust](https://github.com/SWAN-community/owid-rust) for the Rust implementation
 
 ## License
 

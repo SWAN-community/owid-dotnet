@@ -16,6 +16,7 @@
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -327,6 +328,256 @@ namespace Owid.Client.Test
             }
         }
 
+        /// <summary>
+        /// Test that an OWID signed with others verifies when the same others
+        /// are provided to verification.
+        /// </summary>
+        [TestMethod]
+        public async Task TestSignWithOthersVerifiesWithSameOthers()
+        {
+            var others = CreateOthers(2);
+            var owid = new Model.Owid();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
+                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                creator.Sign(owid, others);
+            }
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(await owid.VerifyAsync(crypto, others));
+            }
+        }
+
+        /// <summary>
+        /// Test that an OWID signed with others fails verification when the
+        /// others are not provided.
+        /// </summary>
+        [TestMethod]
+        public async Task TestSignWithOthersFailsWithoutOthers()
+        {
+            var others = CreateOthers(2);
+            var owid = new Model.Owid();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
+                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                creator.Sign(owid, others);
+            }
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsFalse(await owid.VerifyAsync(crypto));
+            }
+        }
+
+        /// <summary>
+        /// Test that an OWID signed with others fails verification when
+        /// different others are provided.
+        /// </summary>
+        [TestMethod]
+        public async Task TestSignWithOthersFailsWithDifferentOthers()
+        {
+            var others = CreateOthers(2);
+            var different = CreateOthers(2);
+            var owid = new Model.Owid();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
+                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                creator.Sign(owid, others);
+            }
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsFalse(await owid.VerifyAsync(crypto, different));
+            }
+        }
+
+        /// <summary>
+        /// Test that a payload modified after signing fails verification.
+        /// </summary>
+        [TestMethod]
+        public async Task TestModifiedPayloadFailsVerification()
+        {
+            var owid = CreateOwid();
+
+            // Tamper with the payload after signing.
+            owid.Payload[0] = (byte)(owid.Payload[0] ^ 0xFF);
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsFalse(await owid.VerifyAsync(crypto));
+            }
+        }
+
+        /// <summary>
+        /// Test that converting to a byte array and back preserves all the
+        /// fields and the result still verifies.
+        /// </summary>
+        [TestMethod]
+        public async Task TestByteArrayRoundtrip()
+        {
+            var original = CreateOwid();
+            var bytes = original.AsByteArray();
+            var copy = new Model.Owid(bytes);
+
+            Assert.AreEqual(original.Version, copy.Version);
+            Assert.AreEqual(original.Domain, copy.Domain);
+
+            // Dates are stored to the minute so compare after flooring the
+            // original to the minute.
+            var expectedDate = FloorToMinute(original.Date);
+            Assert.AreEqual(expectedDate, copy.Date);
+
+            CollectionAssert.AreEqual(original.Payload, copy.Payload);
+            CollectionAssert.AreEqual(original.Signature, copy.Signature);
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(await copy.VerifyAsync(crypto));
+            }
+        }
+
+        /// <summary>
+        /// Test that a truncated Base64 OWID produces a clean exception. A
+        /// truncation that removes part of the signature results in the
+        /// signature length check throwing. A truncation that cuts into the
+        /// header results in an end of stream exception when reading.
+        /// </summary>
+        [TestMethod]
+        public void TestTruncatedBase64Throws()
+        {
+            var base64 = CreateOwid().AsBase64();
+
+            // Truncate to half the length rounded down to a multiple of four
+            // characters so the Base64 itself remains decodable. The missing
+            // bytes are detected when the signature is read.
+            var half = base64.Substring(0, base64.Length / 2 / 4 * 4);
+            Assert.ThrowsExactly<Exception>(() => new Model.Owid(half));
+
+            // Truncate to just the first eight characters which cuts the
+            // buffer inside the domain producing an end of stream exception.
+            var head = base64.Substring(0, 8);
+            Assert.ThrowsExactly<EndOfStreamException>(
+                () => new Model.Owid(head));
+        }
+
+        /// <summary>
+        /// Test that corrupting any single byte of a serialized OWID causes
+        /// either a parsing exception or a verification failure. Mirrors the
+        /// corrupt replace test in the Go implementation.
+        /// </summary>
+        [TestMethod]
+        public async Task TestCorruptAnyByteFailsVerificationOrThrows()
+        {
+            var bytes = CreateOwid().AsByteArray();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                for (var i = 0; i < bytes.Length; i++)
+                {
+                    var corrupt = (byte[])bytes.Clone();
+                    corrupt[i] = (byte)(corrupt[i] ^ 0xFF);
+                    var verified = false;
+                    try
+                    {
+                        var owid = new Model.Owid(corrupt);
+                        verified = await owid.VerifyAsync(crypto);
+                    }
+                    catch (Exception)
+                    {
+                        // A parsing exception is an acceptable outcome for a
+                        // corrupt buffer.
+                        continue;
+                    }
+                    Assert.IsFalse(
+                        verified,
+                        $"Corrupt byte at position '{i}' must not verify");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Test a payload containing non ASCII text. The payload bytes are
+        /// preserved exactly through serialization so a UTF-8 payload can be
+        /// recovered with UTF-8 decoding. PayloadAsString uses ASCII so it
+        /// does not preserve non ASCII characters. This documents the current
+        /// behavior which differs from the Go and JavaScript implementations
+        /// where strings are handled as UTF-8.
+        /// </summary>
+        [TestMethod]
+        public async Task TestNonAsciiPayloadRoundtrip()
+        {
+            const string text = "héllo wörld €100";
+            var owid = new Model.Owid();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
+                owid.Payload = Encoding.UTF8.GetBytes(text);
+                creator.Sign(owid);
+            }
+
+            var copy = new Model.Owid(owid.AsBase64());
+
+            // The payload bytes are preserved exactly.
+            CollectionAssert.AreEqual(owid.Payload, copy.Payload);
+            Assert.AreEqual(text, Encoding.UTF8.GetString(copy.Payload));
+
+            // PayloadAsString uses ASCII and replaces non ASCII characters.
+            Assert.AreNotEqual(text, copy.PayloadAsString);
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(await copy.VerifyAsync(crypto));
+            }
+        }
+
+        /// <summary>
+        /// Test that a configuration with a malformed PEM private key throws
+        /// a clean exception when used to create a <see cref="Creator"/>.
+        /// </summary>
+        [TestMethod]
+        public void TestCreatorWithInvalidPrivateKeyThrows()
+        {
+            var configuration = new Model.Configuration.OwidConfiguration
+            {
+                Domain = TestDomain,
+                PrivateKey = "this is not a PEM private key"
+            };
+            Assert.Throws<ArgumentException>(
+                () => new Creator(configuration));
+        }
+
+        /// <summary>
+        /// Test that a PEM private key with a valid header but corrupt
+        /// content throws a clean exception.
+        /// </summary>
+        [TestMethod]
+        public void TestCreatorWithCorruptPrivateKeyThrows()
+        {
+            var configuration = new Model.Configuration.OwidConfiguration
+            {
+                Domain = TestDomain,
+                PrivateKey =
+                    "-----BEGIN PRIVATE KEY-----\n" +
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
+                    "-----END PRIVATE KEY-----"
+            };
+            Assert.Throws<Exception>(() => new Creator(configuration));
+        }
+
         private Model.Owid CreateOwid()
         {
             var owid = new Model.Owid();
@@ -339,6 +590,28 @@ namespace Owid.Client.Test
                 creator.Sign(owid);
             }
             return owid;
+        }
+
+        private Model.Owid[] CreateOthers(int count)
+        {
+            var others = new Model.Owid[count];
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                var creator = new Creator(TestDomain, crypto);
+                for (var i = 0; i < count; i++)
+                {
+                    others[i] = creator.Sign($"Other {Guid.NewGuid()}");
+                }
+            }
+            return others;
+        }
+
+        internal static DateTime FloorToMinute(DateTime date)
+        {
+            var baseDate = new DateTime(
+                2020, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
+            return baseDate.AddMinutes((uint)(date - baseDate).TotalMinutes);
         }
     }
 }

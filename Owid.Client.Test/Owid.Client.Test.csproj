@@ -24,6 +24,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Owid.Client\Owid.Client.csproj" />
+    <ProjectReference Include="..\Owid.Client.Controllers\Owid.Client.Controllers.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
 </Project>

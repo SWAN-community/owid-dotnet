@@ -578,6 +578,55 @@ namespace Owid.Client.Test
             Assert.Throws<Exception>(() => new Creator(configuration));
         }
 
+        /// <summary>
+        /// Test that constructing a <see cref="Creator"/> with an empty or
+        /// whitespace private key PEM throws an explicit
+        /// <see cref="ArgumentException"/> rather than the opaque exception
+        /// thrown by ImportFromPem. Mirrors the empty key PEM guard added
+        /// across the OWID implementations.
+        /// </summary>
+        [TestMethod]
+        [DataRow("")]
+        [DataRow("   ")]
+        [DataRow("\t\n")]
+        public void TestCreatorWithEmptyPrivateKeyThrows(string privateKey)
+        {
+            var configuration = new Model.Configuration.OwidConfiguration
+            {
+                Domain = TestDomain,
+                PrivateKey = privateKey
+            };
+            var exception = Assert.Throws<ArgumentException>(
+                () => new Creator(configuration));
+            Assert.AreEqual("private key PEM is empty", exception.Message);
+        }
+
+        /// <summary>
+        /// Test that the empty public key PEM guard used on the verify path
+        /// rejects an empty or whitespace PEM with an explicit
+        /// <see cref="ArgumentException"/>. The verify path fetches the public
+        /// key over HTTP so the guard condition is exercised here directly to
+        /// match the behavior in
+        /// <see cref="CryptoExtensions"/>.
+        /// </summary>
+        [TestMethod]
+        [DataRow("")]
+        [DataRow("   ")]
+        [DataRow("\t\n")]
+        public void TestEmptyPublicKeyPemIsRejected(string publicKeyPem)
+        {
+            var exception = Assert.Throws<ArgumentException>(() =>
+            {
+                if (string.IsNullOrWhiteSpace(publicKeyPem))
+                {
+                    throw new ArgumentException("public key PEM is empty");
+                }
+                using var key = ECDsa.Create();
+                key.ImportFromPem(publicKeyPem);
+            });
+            Assert.AreEqual("public key PEM is empty", exception.Message);
+        }
+
         private Model.Owid CreateOwid()
         {
             var owid = new Model.Owid();

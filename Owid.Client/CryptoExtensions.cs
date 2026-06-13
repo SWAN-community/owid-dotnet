@@ -169,10 +169,20 @@ namespace Owid.Client
             u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
             u.Query = "format=pkcs";
 
+			// Fetch the public key PEM associated with the OWID.
+			var publicKeyPem = GetPublicKey(u.Uri);
+
+			// Reject an empty or whitespace PEM with a clear message rather
+			// than relying on the opaque exception thrown by ImportFromPem.
+			if (string.IsNullOrWhiteSpace(publicKeyPem))
+			{
+				throw new ArgumentException("public key PEM is empty");
+			}
+
 			// Create the ECDsa provider with the public key associated with
 			// the OWID.
 			var key = ECDsa.Create();
-			key.ImportFromPem(GetPublicKey(u.Uri));
+			key.ImportFromPem(publicKeyPem);
 			return key;
         }
 

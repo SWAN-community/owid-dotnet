@@ -16,6 +16,7 @@
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
 
 namespace Owid.Client.Controllers
@@ -30,26 +31,48 @@ namespace Owid.Client.Controllers
     public class OwidController : Controller
     {
         private readonly OwidConfiguration _owidConfiguration;
+        private readonly IPublicKeyStore _publicKeyStore;
 
         /// <summary>
         /// Designated constructor.
         /// </summary>
-        /// <param name="owidConfiguration"></param>
-        public OwidController(OwidConfiguration owidConfiguration)
+        /// <param name="owidConfiguration">The OWID creator configuration.</param>
+        /// <param name="publicKeyStore">
+        /// Optional source of signing public keys. When not supplied the single
+        /// key from <paramref name="owidConfiguration"/> is used.
+        /// </param>
+        public OwidController(
+            OwidConfiguration owidConfiguration,
+            IPublicKeyStore? publicKeyStore = null)
         {
             _owidConfiguration = owidConfiguration;
+            _publicKeyStore = publicKeyStore
+                ?? new ConfigurationPublicKeyStore(owidConfiguration);
         }
 
         /// <summary>
-        /// Returns the public key for the OWID creator.
+        /// Returns the public key for the OWID creator. With a date, returns
+        /// the key that was current at that date; without one, the current key.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="date">
+        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
+        /// encoding).
+        /// </param>
+        /// <returns>
+        /// The public key, or 404 when no key was active at the requested date.
+        /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public string? GetPublicKey()
+        public ActionResult<string?> GetPublicKey(uint? date = null)
         {
-            return _owidConfiguration.PublicKey;
+            var key = _publicKeyStore.GetPublicKey(date);
+            if (date.HasValue && key == null)
+            {
+                return NotFound();
+            }
+            return key;
         }
 
 

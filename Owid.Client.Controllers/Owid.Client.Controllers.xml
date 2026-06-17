@@ -10,17 +10,28 @@
             of <see cref="N:Owid"/> signatures.
             </summary>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
+        <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration,Owid.Client.Model.IPublicKeyStore)">
             <summary>
             Designated constructor.
             </summary>
-            <param name="owidConfiguration"></param>
+            <param name="owidConfiguration">The OWID creator configuration.</param>
+            <param name="publicKeyStore">
+            Optional source of signing public keys. When not supplied the single
+            key from <paramref name="owidConfiguration"/> is used.
+            </param>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey">
+        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32})">
             <summary>
-            Returns the public key for the OWID creator.
+            Returns the public key for the OWID creator. With a date, returns
+            the key that was current at that date; without one, the current key.
             </summary>
-            <returns></returns>
+            <param name="date">
+            Optional date as minutes since 2020-01-01 UTC (the OWID date
+            encoding).
+            </param>
+            <returns>
+            The public key, or 404 when no key was active at the requested date.
+            </returns>
         </member>
         <member name="M:Owid.Client.Controllers.OwidController.GetCreator">
             <summary>

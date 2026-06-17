@@ -126,6 +126,30 @@ app.Run();
 The controller then responds to `/owid/api/v1/public-key`,
 `/owid/api/v2/public-key` and the equivalent `creator` paths.
 
+### Historical keys (rotating signing keys)
+
+By default the public-key endpoint returns the single key from
+`OwidConfiguration`. A creator that rotates its signing key can serve the key
+that was current at a given date by registering an `IPublicKeyStore` (types in
+`Owid.Client.Model`):
+
+```csharp
+builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
+{
+    new DatedPublicKey { Created = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = previousPem },
+    new DatedPublicKey { Created = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = currentPem },
+}));
+```
+
+Callers pass the OWID's own date as `?date=<minutes>`, where `date` is the
+number of minutes since `2020-01-01` UTC (the OWID Date encoding):
+
+`GET /owid/api/v1/public-key?date=<minutes>`
+
+The endpoint returns the key with the latest `Created` on or before `date`, the
+current key when `date` is omitted, and `404` when `date` predates the oldest
+known key. Implement `IPublicKeyStore` to plug in any key source.
+
 ## Testing
 
 ```

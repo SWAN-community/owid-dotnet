@@ -14,8 +14,10 @@
  * under the License.
  * ***************************************************************************/
 
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Owid.Client.Controllers;
+using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
 using System;
 using System.Security.Cryptography;
@@ -66,7 +68,7 @@ namespace Owid.Client.Test
             {
                 Assert.AreEqual(
                     Configuration!.PublicKey,
-                    controller.GetPublicKey());
+                    controller.GetPublicKey().Value);
             }
         }
 
@@ -83,6 +85,45 @@ namespace Owid.Client.Test
                 Assert.AreEqual(
                     Configuration!.Domain,
                     controller.GetCreator());
+            }
+        }
+
+        /// <summary>
+        /// A supplied date is resolved through the injected key store.
+        /// </summary>
+        [TestMethod]
+        public void TestGetPublicKeyWithDateUsesStore()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                var minutes = (uint)(
+                    new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
+                    .TotalMinutes;
+                Assert.AreEqual("old", controller.GetPublicKey(minutes).Value);
+            }
+        }
+
+        /// <summary>
+        /// A date before any known key produces a 404.
+        /// </summary>
+        [TestMethod]
+        public void TestGetPublicKeyDateBeforeOldestReturns404()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                // 1440 minutes after the epoch is 2020-01-02, before the key.
+                var result = controller.GetPublicKey(1440);
+                Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
             }
         }
     }

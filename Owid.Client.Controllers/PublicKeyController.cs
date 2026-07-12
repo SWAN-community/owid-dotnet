@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
+using System.Threading.Tasks;
 
 namespace Owid.Client.Controllers
 {
@@ -27,11 +28,13 @@ namespace Owid.Client.Controllers
     /// </summary>
     [Route("[controller]/api/v1")]
     [Route("[controller]/api/v2")]
+    [Route("[controller]/api/v3")]
     [ApiController]
     public class OwidController : Controller
     {
         private readonly OwidConfiguration _owidConfiguration;
         private readonly IPublicKeyStore _publicKeyStore;
+        private readonly IOwidAuthorizer? _authorizer;
 
         /// <summary>
         /// Designated constructor.
@@ -41,13 +44,19 @@ namespace Owid.Client.Controllers
         /// Optional source of signing public keys. When not supplied the single
         /// key from <paramref name="owidConfiguration"/> is used.
         /// </param>
+        /// <param name="authorizer">
+        /// Optional check applied to every request. When not supplied the
+        /// endpoints are open, per the OWID specification's default.
+        /// </param>
         public OwidController(
             OwidConfiguration owidConfiguration,
-            IPublicKeyStore? publicKeyStore = null)
+            IPublicKeyStore? publicKeyStore = null,
+            IOwidAuthorizer? authorizer = null)
         {
             _owidConfiguration = owidConfiguration;
             _publicKeyStore = publicKeyStore
                 ?? new ConfigurationPublicKeyStore(owidConfiguration);
+            _authorizer = authorizer;
         }
 
         /// <summary>
@@ -65,8 +74,13 @@ namespace Owid.Client.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public ActionResult<string?> GetPublicKey(uint? date = null)
+        public async Task<ActionResult<string?>> GetPublicKey(uint? date = null)
         {
+            var denied = await AuthorizeAsync();
+            if (denied != null)
+            {
+                return denied;
+            }
             var key = _publicKeyStore.GetPublicKey(date);
             if (date.HasValue && key == null)
             {
@@ -83,9 +97,19 @@ namespace Owid.Client.Controllers
         [ProducesResponseType(StatusCodes.Status200OK)]
         [HttpGet("creator")]
         [HttpPost("creator")]
-        public string? GetCreator()
+        public async Task<ActionResult<string?>> GetCreator()
         {
+            var denied = await AuthorizeAsync();
+            if (denied != null)
+            {
+                return denied;
+            }
             return _owidConfiguration.Domain;
         }
+
+        private Task<ActionResult?> AuthorizeAsync() =>
+            _authorizer == null
+                ? Task.FromResult<ActionResult?>(null)
+                : _authorizer.AuthorizeAsync(Request);
     }
 }

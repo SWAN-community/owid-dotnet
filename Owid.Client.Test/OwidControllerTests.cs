@@ -14,6 +14,7 @@
  * under the License.
  * ***************************************************************************/
 
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Owid.Client.Controllers;
@@ -21,6 +22,7 @@ using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
 using System;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace Owid.Client.Test
 {
@@ -62,13 +64,13 @@ namespace Owid.Client.Test
         /// key.
         /// </summary>
         [TestMethod]
-        public void TestGetPublicKeyReturnsConfiguredKey()
+        public async Task TestGetPublicKeyReturnsConfiguredKey()
         {
             using (var controller = new OwidController(Configuration!))
             {
                 Assert.AreEqual(
                     Configuration!.PublicKey,
-                    controller.GetPublicKey().Value);
+                    (await controller.GetPublicKey()).Value);
             }
         }
 
@@ -78,13 +80,13 @@ namespace Owid.Client.Test
         /// a JSON document.
         /// </summary>
         [TestMethod]
-        public void TestGetCreatorReturnsConfiguredDomain()
+        public async Task TestGetCreatorReturnsConfiguredDomain()
         {
             using (var controller = new OwidController(Configuration!))
             {
                 Assert.AreEqual(
                     Configuration!.Domain,
-                    controller.GetCreator());
+                    (await controller.GetCreator()).Value);
             }
         }
 
@@ -92,7 +94,7 @@ namespace Owid.Client.Test
         /// A supplied date is resolved through the injected key store.
         /// </summary>
         [TestMethod]
-        public void TestGetPublicKeyWithDateUsesStore()
+        public async Task TestGetPublicKeyWithDateUsesStore()
         {
             var store = new DatedKeyStore(new[]
             {
@@ -105,7 +107,8 @@ namespace Owid.Client.Test
                 var minutes = (uint)(
                     new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
-                Assert.AreEqual("old", controller.GetPublicKey(minutes).Value);
+                Assert.AreEqual(
+                    "old", (await controller.GetPublicKey(minutes)).Value);
             }
         }
 
@@ -113,7 +116,7 @@ namespace Owid.Client.Test
         /// A date before any known key produces a 404.
         /// </summary>
         [TestMethod]
-        public void TestGetPublicKeyDateBeforeOldestReturns404()
+        public async Task TestGetPublicKeyDateBeforeOldestReturns404()
         {
             var store = new DatedKeyStore(new[]
             {
@@ -122,9 +125,68 @@ namespace Owid.Client.Test
             using (var controller = new OwidController(Configuration!, store))
             {
                 // 1440 minutes after the epoch is 2020-01-02, before the key.
-                var result = controller.GetPublicKey(1440);
+                var result = await controller.GetPublicKey(1440);
                 Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
             }
+        }
+
+        /// <summary>
+        /// A denying authorizer's result is returned from both endpoints.
+        /// </summary>
+        [TestMethod]
+        public async Task TestAuthorizerDeniedResultIsReturned()
+        {
+            var authorizer = new StubAuthorizer(new UnauthorizedResult());
+            using (var controller = new OwidController(
+                Configuration!, null, authorizer))
+            {
+                controller.ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext()
+                };
+                Assert.IsInstanceOfType(
+                    (await controller.GetPublicKey()).Result,
+                    typeof(UnauthorizedResult));
+                Assert.IsInstanceOfType(
+                    (await controller.GetCreator()).Result,
+                    typeof(UnauthorizedResult));
+            }
+        }
+
+        /// <summary>
+        /// An authorizer that returns null lets the request through.
+        /// </summary>
+        [TestMethod]
+        public async Task TestAuthorizerAllowingRequestReturnsValues()
+        {
+            var authorizer = new StubAuthorizer(null);
+            using (var controller = new OwidController(
+                Configuration!, null, authorizer))
+            {
+                controller.ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext()
+                };
+                Assert.AreEqual(
+                    Configuration!.PublicKey,
+                    (await controller.GetPublicKey()).Value);
+                Assert.AreEqual(
+                    Configuration!.Domain,
+                    (await controller.GetCreator()).Value);
+            }
+        }
+
+        private sealed class StubAuthorizer : IOwidAuthorizer
+        {
+            private readonly ActionResult? _result;
+
+            public StubAuthorizer(ActionResult? result)
+            {
+                _result = result;
+            }
+
+            public Task<ActionResult?> AuthorizeAsync(HttpRequest request) =>
+                Task.FromResult(_result);
         }
     }
 }

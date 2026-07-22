@@ -93,21 +93,42 @@ namespace Owid.Client.Controllers
 
 
         /// <summary>
-        /// Returns the public key for the OWID creator.
+        /// Returns the creator domain and signing public key. With a date,
+        /// returns the key that was current at that date; without one, the
+        /// current key. This matches the public-key end point so the two agree.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="date">
+        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
+        /// encoding).
+        /// </param>
+        /// <returns>
+        /// The creator info, or 404 when no key was active at the requested
+        /// date.
+        /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("creator")]
         [HttpPost("creator")]
-        public async Task<ActionResult<string?>> GetCreator()
+        public async Task<ActionResult<CreatorResponse>> GetCreator(
+            uint? date = null)
         {
             var denied = await AuthorizeAsync();
             if (denied != null)
             {
                 return denied;
             }
-            return _owidConfiguration.Domain;
+            var key = _publicKeyStore.GetPublicKey(date);
+            if (date.HasValue && key == null)
+            {
+                return NotFound();
+            }
+            return new CreatorResponse
+            {
+                Domain = _owidConfiguration.Domain,
+                PublicKeySPKI = key,
+            };
         }
 
         private Task<ActionResult?> AuthorizeAsync() =>

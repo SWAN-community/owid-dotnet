@@ -84,9 +84,49 @@ namespace Owid.Client.Test
         {
             using (var controller = new OwidController(Configuration!))
             {
-                Assert.AreEqual(
-                    Configuration!.Domain,
-                    (await controller.GetCreator()).Value);
+                var creator = (await controller.GetCreator()).Value;
+                Assert.AreEqual(Configuration!.Domain, creator!.Domain);
+                Assert.AreEqual(Configuration!.PublicKey, creator!.PublicKeySPKI);
+            }
+        }
+
+        /// <summary>
+        /// A supplied date selects the creator's key through the store, so the
+        /// creator and public-key endpoints agree.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetCreatorWithDateUsesStore()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                var minutes = (uint)(
+                    new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
+                    .TotalMinutes;
+                var creator = (await controller.GetCreator(minutes)).Value;
+                Assert.AreEqual("old", creator!.PublicKeySPKI);
+            }
+        }
+
+        /// <summary>
+        /// A date before any known key produces a 404 on the creator endpoint.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetCreatorDateBeforeOldestReturns404()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var result = await controller.GetCreator(1440);
+                Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
             }
         }
 
@@ -172,7 +212,7 @@ namespace Owid.Client.Test
                     (await controller.GetPublicKey()).Value);
                 Assert.AreEqual(
                     Configuration!.Domain,
-                    (await controller.GetCreator()).Value);
+                    (await controller.GetCreator()).Value!.Domain);
             }
         }
 

@@ -62,6 +62,16 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// A date exactly equal to a key's Created returns that key, proving
+        /// the "on or before" boundary is inclusive.
+        /// </summary>
+        [TestMethod]
+        public void GetPublicKey_ExactlyOnCreated_ReturnsThatKey()
+        {
+            Assert.AreEqual("k-0308", Store().GetPublicKey(Minutes(2026, 3, 8)));
+        }
+
+        /// <summary>
         /// A date after the newest key returns the newest key.
         /// </summary>
         [TestMethod]

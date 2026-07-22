@@ -165,10 +165,17 @@ public class RequireApiKey : IOwidAuthorizer
 {
     public Task<ActionResult?> AuthorizeAsync(HttpRequest request)
     {
-        ActionResult? denied = request.Headers.ContainsKey("X-Api-Key")
+        // Accept the credential from a header, the query string, or a form
+        // field, and name all three in the 401, as the OWID spec recommends.
+        var present =
+            request.Headers.ContainsKey("X-Api-Key") ||
+            request.Query.ContainsKey("apiKey") ||
+            (request.HasFormContentType && request.Form.ContainsKey("apiKey"));
+        ActionResult? denied = present
             ? null // allowed
             : new UnauthorizedObjectResult(
-                "An API key is required to call this endpoint.");
+                "An API key is required. Supply it as the X-Api-Key header, " +
+                "an apiKey query parameter, or an apiKey form field.");
         return Task.FromResult(denied);
     }
 }

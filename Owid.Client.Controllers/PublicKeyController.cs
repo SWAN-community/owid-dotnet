@@ -71,6 +71,8 @@ namespace Owid.Client.Controllers
         /// The public key, or 404 when no key was active at the requested date.
         /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
@@ -95,6 +97,7 @@ namespace Owid.Client.Controllers
         /// </summary>
         /// <returns></returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [HttpGet("creator")]
         [HttpPost("creator")]
         public async Task<ActionResult<string?>> GetCreator()

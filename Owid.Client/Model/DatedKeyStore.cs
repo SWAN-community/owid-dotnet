@@ -43,7 +43,9 @@ namespace Owid.Client.Model
     /// </summary>
     public class DatedKeyStore : IPublicKeyStore
     {
-        private readonly IReadOnlyList<DatedPublicKey> _keys;
+        // Sorted newest first once at construction so each lookup is a simple
+        // scan rather than re-sorting on every request.
+        private readonly IReadOnlyList<DatedPublicKey> _keysNewestFirst;
 
         /// <summary>
         /// Designated constructor.
@@ -51,16 +53,15 @@ namespace Owid.Client.Model
         /// <param name="keys">The known keys, in any order.</param>
         public DatedKeyStore(IEnumerable<DatedPublicKey> keys)
         {
-            _keys = keys.ToList();
+            _keysNewestFirst = keys.OrderByDescending(k => k.Created).ToList();
         }
 
         /// <inheritdoc/>
         public string? GetPublicKey(uint? dateMinutes)
         {
-            var newestFirst = _keys.OrderByDescending(k => k.Created);
             if (dateMinutes == null)
             {
-                return newestFirst.FirstOrDefault()?.PublicKey;
+                return _keysNewestFirst.FirstOrDefault()?.PublicKey;
             }
 
             DateTime requested;
@@ -74,7 +75,7 @@ namespace Owid.Client.Model
                 requested = DateTime.MaxValue;
             }
 
-            return newestFirst
+            return _keysNewestFirst
                 .FirstOrDefault(k => k.Created <= requested)?.PublicKey;
         }
     }

@@ -167,7 +167,13 @@ namespace Owid.Client
                 scheme,
                 owid.Domain);
             u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
-            u.Query = "format=pkcs";
+            // Send the OWID's own date so a creator that rotates keys returns
+            // the key that was current when the OWID was signed, letting OWIDs
+            // created before a rotation still verify. Creators that do not
+            // support dated lookup ignore it and return the current key.
+            u.Query = owid.Date >= Constants.BaseDate
+                ? @$"format=pkcs&date={(uint)(owid.Date - Constants.BaseDate).TotalMinutes}"
+                : "format=pkcs";
 
 			// Fetch the public key PEM associated with the OWID.
 			var publicKeyPem = GetPublicKey(u.Uri);

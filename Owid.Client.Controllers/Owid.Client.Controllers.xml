@@ -4,29 +4,87 @@
         <name>Owid.Client.Controllers</name>
     </assembly>
     <members>
+        <member name="T:Owid.Client.Controllers.CreatorResponse">
+            <summary>
+            The creator end point response, per the SWAN OWID spec. Carries the
+            creator domain and the signing public key in SPKI form, so a consumer
+            can cache the key without a second call. With a date the key that was
+            current then is returned, matching the public-key end point.
+            </summary>
+        </member>
+        <member name="P:Owid.Client.Controllers.CreatorResponse.Domain">
+            <summary>
+            The domain the key relates to.
+            </summary>
+        </member>
+        <member name="P:Owid.Client.Controllers.CreatorResponse.PublicKeySPKI">
+            <summary>
+            The signing public key in SPKI form.
+            </summary>
+        </member>
+        <member name="T:Owid.Client.Controllers.IOwidAuthorizer">
+            <summary>
+            Decides whether a request may use the public-key and creator
+            endpoints. The OWID specification leaves authentication to the
+            implementor; supply an implementation to require credentials.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.Controllers.IOwidAuthorizer.AuthorizeAsync(Microsoft.AspNetCore.Http.HttpRequest)">
+            <summary>
+            Inspects the request and returns null to allow it, or the action
+            result to send instead, for example a 401 describing how to
+            supply a credential. Async so the check can call a database or
+            another service.
+            </summary>
+            <param name="request">The incoming request.</param>
+        </member>
         <member name="T:Owid.Client.Controllers.OwidController">
             <summary>
             API controller to enable verification
             of <see cref="N:Owid"/> signatures.
             </summary>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
+        <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration,Owid.Client.Model.IPublicKeyStore,Owid.Client.Controllers.IOwidAuthorizer)">
             <summary>
             Designated constructor.
             </summary>
-            <param name="owidConfiguration"></param>
+            <param name="owidConfiguration">The OWID creator configuration.</param>
+            <param name="publicKeyStore">
+            Optional source of signing public keys. When not supplied the single
+            key from <paramref name="owidConfiguration"/> is used.
+            </param>
+            <param name="authorizer">
+            Optional check applied to every request. When not supplied the
+            endpoints are open, per the OWID specification's default.
+            </param>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey">
+        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32})">
             <summary>
-            Returns the public key for the OWID creator.
+            Returns the public key for the OWID creator. With a date, returns
+            the key that was current at that date; without one, the current key.
             </summary>
-            <returns></returns>
+            <param name="date">
+            Optional date as minutes since 2020-01-01 UTC (the OWID date
+            encoding).
+            </param>
+            <returns>
+            The public key, or 404 when no key was active at the requested date.
+            </returns>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetCreator">
+        <member name="M:Owid.Client.Controllers.OwidController.GetCreator(System.Nullable{System.UInt32})">
             <summary>
-            Returns the public key for the OWID creator.
+            Returns the creator domain and signing public key. With a date,
+            returns the key that was current at that date; without one, the
+            current key. This matches the public-key end point so the two agree.
             </summary>
-            <returns></returns>
+            <param name="date">
+            Optional date as minutes since 2020-01-01 UTC (the OWID date
+            encoding).
+            </param>
+            <returns>
+            The creator info, or 404 when no key was active at the requested
+            date.
+            </returns>
         </member>
     </members>
 </doc>

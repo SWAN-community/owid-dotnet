@@ -124,7 +124,67 @@ app.Run();
 ```
 
 The controller then responds to `/owid/api/v1/public-key`,
-`/owid/api/v2/public-key` and the equivalent `creator` paths.
+`/owid/api/v2/public-key`, `/owid/api/v3/public-key` and the equivalent
+`creator` paths. Use the v3 paths for new integrations; v1 and v2 remain for
+backwards compatibility.
+
+### Historical keys (rotating signing keys)
+
+By default the public-key endpoint returns the single key from
+`OwidConfiguration`. A creator that rotates its signing key can serve the key
+that was current at a given date by registering an `IPublicKeyStore` (types in
+`Owid.Client.Model`):
+
+```csharp
+builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
+{
+    new DatedPublicKey { Created = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = previousPem },
+    new DatedPublicKey { Created = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = currentPem },
+}));
+```
+
+Callers pass the OWID's own date as `?date=<minutes>`, where `date` is the
+number of minutes since `2020-01-01` UTC (the OWID Date encoding):
+
+`GET /owid/api/v1/public-key?date=<minutes>`
+
+The endpoint returns the key with the latest `Created` on or before `date`, the
+current key when `date` is omitted, and `404` when `date` predates the oldest
+known key. Implement `IPublicKeyStore` to plug in any key source.
+
+### Requiring authentication (optional)
+
+The OWID specification leaves authentication to the implementor: a creator
+MAY require a credential on the public-key and creator endpoints, for
+example to tie key access to a subscription. Register an `IOwidAuthorizer`
+to enforce your own rule; without one the endpoints stay open. The check is
+async so it can call a database or another service.
+
+```csharp
+public class RequireApiKey : IOwidAuthorizer
+{
+    public Task<ActionResult?> AuthorizeAsync(HttpRequest request)
+    {
+        // Accept the credential from a header, the query string, or a form
+        // field, and name all three in the 401, as the OWID spec recommends.
+        var present =
+            request.Headers.ContainsKey("X-Api-Key") ||
+            request.Query.ContainsKey("apiKey") ||
+            (request.HasFormContentType && request.Form.ContainsKey("apiKey"));
+        ActionResult? denied = present
+            ? null // allowed
+            : new UnauthorizedObjectResult(
+                "An API key is required. Supply it as the X-Api-Key header, " +
+                "an apiKey query parameter, or an apiKey form field.");
+        return Task.FromResult(denied);
+    }
+}
+
+builder.Services.AddSingleton<IOwidAuthorizer>(new RequireApiKey());
+```
+
+The 51Degrees cloud, for example, requires a resource key or license key on
+these endpoints and meters each call.
 
 ## Testing
 

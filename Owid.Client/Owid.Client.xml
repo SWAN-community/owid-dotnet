@@ -154,6 +154,18 @@
             <param name="others"></param>
             <returns></returns>
         </member>
+        <member name="M:Owid.Client.CryptoExtensions.Verify(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
+            <summary>
+            Verify that <see cref="N:Owid"/> signature is correct without any
+            asynchronous machinery. Verification is a short CPU-bound
+            operation, so callers on a request path should prefer this over
+            the asynchronous methods, which remain for compatibility.
+            </summary>
+            <param name="owid"></param>
+            <param name="crypto"></param>
+            <param name="others"></param>
+            <returns></returns>
+        </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsyncWithOthers(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
             <summary>
             Verify that <see cref="N:Owid"/> signature is correct.
@@ -200,6 +212,45 @@
             <param name="owid"></param>
             <returns></returns>
         </member>
+        <member name="M:Owid.Client.Extensions.GetByteCount(Owid.Client.Model.Owid)">
+            <summary>
+            The number of bytes <see cref="M:Owid.Client.Extensions.AsByteArray(Owid.Client.Model.Owid)"/> returns for the
+            OWID in its current state, being the version byte, the domain
+            with its terminator, the date, the length-prefixed payload and
+            the signature.
+            </summary>
+            <param name="owid"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Owid.Client.Extensions.GetSignedBytes(Owid.Client.Model.Owid)">
+            <summary>
+            The bytes the signature covers, being the version, domain, date
+            and payload. A caller that checks one OWID against several
+            candidate public keys can build these bytes once and run the
+            signature check per key, rather than rebuilding the same bytes
+            for every attempt.
+            </summary>
+            <param name="owid"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Owid.Client.Extensions.GetSignedByteCount(Owid.Client.Model.Owid)">
+            <summary>
+            The number of bytes the signature covers, being everything
+            <see cref="M:Owid.Client.Extensions.GetByteCount(Owid.Client.Model.Owid)"/> counts except the signature itself.
+            </summary>
+            <param name="owid"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Owid.Client.Extensions.ToExactBuffer``1(System.Int32,``0,System.Action{System.IO.BinaryWriter,``0})">
+            <summary>
+            Writes into a buffer of exactly the given size through a
+            BinaryWriter, so every serialization shares one sizing and
+            wrapping implementation. The buffer never grows and is returned
+            without a final copy, and a wrong size fails loudly rather than
+            truncating. The state parameter with static callers keeps the
+            sharing free of closure allocations.
+            </summary>
+        </member>
         <member name="M:Owid.Client.Extensions.AsBase64(Owid.Client.Model.Owid)">
             <summary>
             Converts <see cref="N:Owid"/> to Base64-encoded string.
@@ -229,6 +280,22 @@
             <param name="reader"></param>
             <exception cref="T:System.Exception"></exception>
         </member>
+        <member name="T:Owid.Client.Model.ConfigurationPublicKeyStore">
+            <summary>
+            Default <see cref="T:Owid.Client.Model.IPublicKeyStore"/> backed by the single key in
+            <see cref="T:Owid.Client.Model.Configuration.OwidConfiguration"/>. A creator with one long-lived key has
+            no key history, so the date is ignored.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
+            <summary>
+            Designated constructor.
+            </summary>
+            <param name="configuration">The OWID creator configuration.</param>
+        </member>
+        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.GetPublicKey(System.Nullable{System.UInt32})">
+            <inheritdoc/>
+        </member>
         <member name="T:Owid.Client.Model.Configuration.OwidConfiguration">
             <summary>
             Configuration for <see cref="T:Owid.Client.Creator"/>
@@ -251,22 +318,6 @@
             <summary>
             The PEM format public key for the OWID creator.
             </summary>
-        </member>
-        <member name="T:Owid.Client.Model.ConfigurationPublicKeyStore">
-            <summary>
-            Default <see cref="T:Owid.Client.Model.IPublicKeyStore"/> backed by the single key in
-            <see cref="T:Owid.Client.Model.Configuration.OwidConfiguration"/>. A creator with one long-lived key has
-            no key history, so the date is ignored.
-            </summary>
-        </member>
-        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
-            <summary>
-            Designated constructor.
-            </summary>
-            <param name="configuration">The OWID creator configuration.</param>
-        </member>
-        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.GetPublicKey(System.Nullable{System.UInt32})">
-            <inheritdoc/>
         </member>
         <member name="T:Owid.Client.Model.DatedPublicKey">
             <summary>

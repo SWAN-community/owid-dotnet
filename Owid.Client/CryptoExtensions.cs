@@ -109,6 +109,28 @@ namespace Owid.Client
 		}
 
         /// <summary>
+        /// Verify that <see cref="Owid"/> signature is correct without any
+        /// asynchronous machinery. Verification is a short CPU-bound
+        /// operation, so callers on a request path should prefer this over
+        /// the asynchronous methods, which remain for compatibility.
+        /// </summary>
+        /// <param name="owid"></param>
+        /// <param name="crypto"></param>
+        /// <param name="others"></param>
+        /// <returns></returns>
+        public static bool Verify(
+			this Model.Owid owid,
+			ECDsa crypto,
+			params Model.Owid[] others)
+		{
+			var data = owid.GetDataForCrypto(others ?? Constants.Empty);
+			return crypto.VerifyData(
+				data,
+				owid.Signature,
+				HashAlgorithmName.SHA256);
+		}
+
+        /// <summary>
         /// Verify that <see cref="Owid"/> signature is correct.
         /// </summary>
         /// <param name="owid"></param>
@@ -120,11 +142,12 @@ namespace Owid.Client
 			ECDsa crypto,
 			Model.Owid[] others)
 		{
-			var data = owid.GetDataForCrypto(others);
-			return Task.Run(() => crypto.VerifyData(
-				data,
-				owid.Signature,
-				HashAlgorithmName.SHA256));
+			// Completes synchronously. The previous implementation queued
+			// the check to the thread pool with Task.Run, which cost a pool
+			// thread and a hop for a sub-millisecond CPU-bound operation,
+			// and callers that block on the result then held two threads
+			// per verification.
+			return Task.FromResult(owid.Verify(crypto, others));
 		}
 
 		/// <summary>
@@ -135,21 +158,31 @@ namespace Owid.Client
 		/// <param name="others"></param>
 		/// <returns></returns>
 		internal static byte[] GetDataForCrypto(
-			this Model.Owid owid, 
+			this Model.Owid owid,
 			Model.Owid[] others)
         {
-			using(var ms = new MemoryStream())
-            {
-				using (var writer = new BinaryWriter(ms))
-				{
-					owid.ToBufferNoSignature(writer);
-					foreach(var other in others)
-                    {
-						other.ToBuffer(writer);
-                    }
-				}
-				return ms.ToArray();
+			// With no others the data is exactly the signed bytes, which is
+			// the common case on the verification path.
+			if (others.Length == 0)
+			{
+				return owid.GetSignedBytes();
 			}
+			var size = owid.GetSignedByteCount();
+			foreach (var other in others)
+			{
+				size += other.GetByteCount();
+			}
+			return Extensions.ToExactBuffer(
+				size,
+				(owid, others),
+				static (writer, state) =>
+				{
+					state.owid.ToBufferNoSignature(writer);
+					foreach (var other in state.others)
+					{
+						other.ToBuffer(writer);
+					}
+				});
         }
 
 		/// <summary>

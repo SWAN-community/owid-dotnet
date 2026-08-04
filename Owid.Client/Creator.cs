@@ -52,6 +52,14 @@ namespace Owid.Client
             ArgumentException.ThrowIfNullOrWhiteSpace(
                 configuration.Domain);
             Domain = configuration.Domain;
+
+            // Reject an empty or whitespace PEM with a clear message rather
+            // than relying on the opaque exception thrown by ImportFromPem.
+            if (string.IsNullOrWhiteSpace(configuration.PrivateKey))
+            {
+                throw new ArgumentException("private key PEM is empty");
+            }
+
             Crypto = ECDsa.Create();
             Crypto.ImportFromPem(configuration.PrivateKey);
             ValidateCrypto(Crypto);

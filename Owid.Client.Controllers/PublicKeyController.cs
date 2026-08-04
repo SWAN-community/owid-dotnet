@@ -16,7 +16,9 @@
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
+using System.Threading.Tasks;
 
 namespace Owid.Client.Controllers
 {
@@ -26,43 +28,112 @@ namespace Owid.Client.Controllers
     /// </summary>
     [Route("[controller]/api/v1")]
     [Route("[controller]/api/v2")]
+    [Route("[controller]/api/v3")]
     [ApiController]
     public class OwidController : Controller
     {
         private readonly OwidConfiguration _owidConfiguration;
+        private readonly IPublicKeyStore _publicKeyStore;
+        private readonly IOwidAuthorizer? _authorizer;
 
         /// <summary>
         /// Designated constructor.
         /// </summary>
-        /// <param name="owidConfiguration"></param>
-        public OwidController(OwidConfiguration owidConfiguration)
+        /// <param name="owidConfiguration">The OWID creator configuration.</param>
+        /// <param name="publicKeyStore">
+        /// Optional source of signing public keys. When not supplied the single
+        /// key from <paramref name="owidConfiguration"/> is used.
+        /// </param>
+        /// <param name="authorizer">
+        /// Optional check applied to every request. When not supplied the
+        /// endpoints are open, per the OWID specification's default.
+        /// </param>
+        public OwidController(
+            OwidConfiguration owidConfiguration,
+            IPublicKeyStore? publicKeyStore = null,
+            IOwidAuthorizer? authorizer = null)
         {
             _owidConfiguration = owidConfiguration;
+            _publicKeyStore = publicKeyStore
+                ?? new ConfigurationPublicKeyStore(owidConfiguration);
+            _authorizer = authorizer;
         }
 
         /// <summary>
-        /// Returns the public key for the OWID creator.
+        /// Returns the public key for the OWID creator. With a date, returns
+        /// the key that was current at that date; without one, the current key.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="date">
+        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
+        /// encoding).
+        /// </param>
+        /// <returns>
+        /// The public key, or 404 when no key was active at the requested date.
+        /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public string? GetPublicKey()
+        public async Task<ActionResult<string?>> GetPublicKey(uint? date = null)
         {
-            return _owidConfiguration.PublicKey;
+            var denied = await AuthorizeAsync();
+            if (denied != null)
+            {
+                return denied;
+            }
+            var key = _publicKeyStore.GetPublicKey(date);
+            if (date.HasValue && key == null)
+            {
+                return NotFound();
+            }
+            return key;
         }
 
 
         /// <summary>
-        /// Returns the public key for the OWID creator.
+        /// Returns the creator domain and signing public key. With a date,
+        /// returns the key that was current at that date; without one, the
+        /// current key. This matches the public-key end point so the two agree.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="date">
+        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
+        /// encoding).
+        /// </param>
+        /// <returns>
+        /// The creator info, or 404 when no key was active at the requested
+        /// date.
+        /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [HttpGet("creator")]
         [HttpPost("creator")]
-        public string? GetCreator()
+        public async Task<ActionResult<CreatorResponse>> GetCreator(
+            uint? date = null)
         {
-            return _owidConfiguration.Domain;
+            var denied = await AuthorizeAsync();
+            if (denied != null)
+            {
+                return denied;
+            }
+            var key = _publicKeyStore.GetPublicKey(date);
+            if (date.HasValue && key == null)
+            {
+                return NotFound();
+            }
+            return new CreatorResponse
+            {
+                Domain = _owidConfiguration.Domain,
+                PublicKeySPKI = key,
+            };
         }
+
+        private Task<ActionResult?> AuthorizeAsync() =>
+            _authorizer == null
+                ? Task.FromResult<ActionResult?>(null)
+                : _authorizer.AuthorizeAsync(Request);
     }
 }

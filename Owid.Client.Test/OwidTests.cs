@@ -327,6 +327,71 @@ namespace Owid.Client.Test
             }
         }
 
+        /// <summary>
+        /// Test the synchronous Verify accepts a genuine OWID and rejects a
+        /// tampered one, matching the asynchronous behaviour.
+        /// </summary>
+        [TestMethod]
+        public void TestSynchronousVerify()
+        {
+            var owid = CreateOwid();
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(owid.Verify(crypto));
+
+                owid.Signature[0] = (byte)(owid.Signature[0] ^ 0xFF);
+                Assert.IsFalse(owid.Verify(crypto));
+            }
+        }
+
+        /// <summary>
+        /// Test GetByteCount matches the serialized length exactly, so the
+        /// presized serialization buffers can never be wrong silently.
+        /// </summary>
+        [TestMethod]
+        public void TestGetByteCountMatchesSerializedLength()
+        {
+            var owid = CreateOwid();
+            Assert.AreEqual(owid.GetByteCount(), owid.AsByteArray().Length);
+
+            // And with an empty payload.
+            var empty = new Model.Owid();
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PrivatePEM);
+                new Creator(TestDomain, crypto).Sign(empty);
+            }
+            Assert.AreEqual(empty.GetByteCount(), empty.AsByteArray().Length);
+        }
+
+        /// <summary>
+        /// Test GetSignedBytes returns exactly the serialized bytes minus
+        /// the signature, and that verifying those bytes directly agrees
+        /// with Verify.
+        /// </summary>
+        [TestMethod]
+        public void TestGetSignedBytesMatchesSerializedPrefix()
+        {
+            var owid = CreateOwid();
+            var whole = owid.AsByteArray();
+            var signed = owid.GetSignedBytes();
+
+            Assert.AreEqual(whole.Length - 64, signed.Length);
+            for (var i = 0; i < signed.Length; i++)
+            {
+                Assert.AreEqual(whole[i], signed[i], $"byte {i} differs");
+            }
+
+            using (var crypto = ECDsa.Create())
+            {
+                crypto.ImportFromPem(PublicPEM);
+                Assert.IsTrue(crypto.VerifyData(
+                    signed, owid.Signature, HashAlgorithmName.SHA256));
+            }
+        }
+
         private Model.Owid CreateOwid()
         {
             var owid = new Model.Owid();

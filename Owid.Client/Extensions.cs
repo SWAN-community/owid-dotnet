@@ -35,14 +35,71 @@ namespace Owid.Client
 		/// <returns></returns>
 		public static byte[] AsByteArray(this Model.Owid owid)
 		{
-			using (var stream = new MemoryStream())
+			// Sized exactly, so the stream never grows and the buffer is
+			// returned without the final copy ToArray used to make.
+			var buffer = new byte[owid.GetByteCount()];
+			using (var stream = new MemoryStream(buffer))
 			{
 				using (var writer = new BinaryWriter(stream))
 				{
 					owid.ToBuffer(writer);
 				}
-				return stream.ToArray();
 			}
+			return buffer;
+		}
+
+		/// <summary>
+		/// The number of bytes <see cref="AsByteArray"/> returns for the
+		/// OWID in its current state, being the version byte, the domain
+		/// with its terminator, the date, the length-prefixed payload and
+		/// the signature.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <returns></returns>
+		public static int GetByteCount(this Model.Owid owid)
+		{
+			int dateLength;
+			switch (owid.Version)
+			{
+				case OwidVersion.Version1:
+					dateLength = 2;
+					break;
+				case OwidVersion.Version2:
+				case OwidVersion.Version3:
+					dateLength = 4;
+					break;
+				default:
+					throw new Exception(
+						@$"OWID version '{owid.Version}' not supported");
+			}
+			return 1 +
+				ASCIIEncoding.ASCII.GetByteCount(owid.Domain) + 1 +
+				dateLength +
+				4 + owid.Payload.Length +
+				Constants.SignatureLength;
+		}
+
+		/// <summary>
+		/// The bytes the signature covers, being the version, domain, date
+		/// and payload. A caller that checks one OWID against several
+		/// candidate public keys can build these bytes once and run the
+		/// signature check per key, rather than rebuilding the same bytes
+		/// for every attempt.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <returns></returns>
+		public static byte[] GetSignedBytes(this Model.Owid owid)
+		{
+			var buffer = new byte[
+				owid.GetByteCount() - Constants.SignatureLength];
+			using (var stream = new MemoryStream(buffer))
+			{
+				using (var writer = new BinaryWriter(stream))
+				{
+					owid.ToBufferNoSignature(writer);
+				}
+			}
+			return buffer;
 		}
 
         /// <summary>

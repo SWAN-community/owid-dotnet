@@ -161,26 +161,28 @@ namespace Owid.Client
 			this Model.Owid owid,
 			Model.Owid[] others)
         {
-			// Sized exactly, so the stream never grows and the buffer is
-			// returned without a final copy.
-			var size = owid.GetByteCount() - Constants.SignatureLength;
+			// With no others the data is exactly the signed bytes, which is
+			// the common case on the verification path.
+			if (others.Length == 0)
+			{
+				return owid.GetSignedBytes();
+			}
+			var size = owid.GetSignedByteCount();
 			foreach (var other in others)
 			{
 				size += other.GetByteCount();
 			}
-			var buffer = new byte[size];
-			using (var ms = new MemoryStream(buffer))
-            {
-				using (var writer = new BinaryWriter(ms))
+			return Extensions.ToExactBuffer(
+				size,
+				(owid, others),
+				static (writer, state) =>
 				{
-					owid.ToBufferNoSignature(writer);
-					foreach(var other in others)
-                    {
+					state.owid.ToBufferNoSignature(writer);
+					foreach (var other in state.others)
+					{
 						other.ToBuffer(writer);
-                    }
-				}
-			}
-			return buffer;
+					}
+				});
         }
 
 		/// <summary>

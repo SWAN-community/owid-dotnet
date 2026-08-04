@@ -35,17 +35,10 @@ namespace Owid.Client
 		/// <returns></returns>
 		public static byte[] AsByteArray(this Model.Owid owid)
 		{
-			// Sized exactly, so the stream never grows and the buffer is
-			// returned without the final copy ToArray used to make.
-			var buffer = new byte[owid.GetByteCount()];
-			using (var stream = new MemoryStream(buffer))
-			{
-				using (var writer = new BinaryWriter(stream))
-				{
-					owid.ToBuffer(writer);
-				}
-			}
-			return buffer;
+			return ToExactBuffer(
+				owid.GetByteCount(),
+				owid,
+				static (writer, o) => o.ToBuffer(writer));
 		}
 
 		/// <summary>
@@ -90,13 +83,42 @@ namespace Owid.Client
 		/// <returns></returns>
 		public static byte[] GetSignedBytes(this Model.Owid owid)
 		{
-			var buffer = new byte[
-				owid.GetByteCount() - Constants.SignatureLength];
+			return ToExactBuffer(
+				owid.GetSignedByteCount(),
+				owid,
+				static (writer, o) => o.ToBufferNoSignature(writer));
+		}
+
+		/// <summary>
+		/// The number of bytes the signature covers, being everything
+		/// <see cref="GetByteCount"/> counts except the signature itself.
+		/// </summary>
+		/// <param name="owid"></param>
+		/// <returns></returns>
+		public static int GetSignedByteCount(this Model.Owid owid)
+		{
+			return owid.GetByteCount() - Constants.SignatureLength;
+		}
+
+		/// <summary>
+		/// Writes into a buffer of exactly the given size through a
+		/// BinaryWriter, so every serialization shares one sizing and
+		/// wrapping implementation. The buffer never grows and is returned
+		/// without a final copy, and a wrong size fails loudly rather than
+		/// truncating. The state parameter with static callers keeps the
+		/// sharing free of closure allocations.
+		/// </summary>
+		internal static byte[] ToExactBuffer<TState>(
+			int size,
+			TState state,
+			Action<BinaryWriter, TState> write)
+		{
+			var buffer = new byte[size];
 			using (var stream = new MemoryStream(buffer))
 			{
 				using (var writer = new BinaryWriter(stream))
 				{
-					owid.ToBufferNoSignature(writer);
+					write(writer, state);
 				}
 			}
 			return buffer;

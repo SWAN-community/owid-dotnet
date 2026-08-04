@@ -233,6 +233,24 @@
             <param name="owid"></param>
             <returns></returns>
         </member>
+        <member name="M:Owid.Client.Extensions.GetSignedByteCount(Owid.Client.Model.Owid)">
+            <summary>
+            The number of bytes the signature covers, being everything
+            <see cref="M:Owid.Client.Extensions.GetByteCount(Owid.Client.Model.Owid)"/> counts except the signature itself.
+            </summary>
+            <param name="owid"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Owid.Client.Extensions.ToExactBuffer``1(System.Int32,``0,System.Action{System.IO.BinaryWriter,``0})">
+            <summary>
+            Writes into a buffer of exactly the given size through a
+            BinaryWriter, so every serialization shares one sizing and
+            wrapping implementation. The buffer never grows and is returned
+            without a final copy, and a wrong size fails loudly rather than
+            truncating. The state parameter with static callers keeps the
+            sharing free of closure allocations.
+            </summary>
+        </member>
         <member name="M:Owid.Client.Extensions.AsBase64(Owid.Client.Model.Owid)">
             <summary>
             Converts <see cref="N:Owid"/> to Base64-encoded string.

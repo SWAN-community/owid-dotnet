@@ -133,6 +133,13 @@ namespace Owid.Client
         /// <summary>
         /// Verify that <see cref="Owid"/> signature is correct.
         /// </summary>
+        /// <remarks>
+        /// Completes synchronously, so failures are thrown by this call
+        /// rather than surfacing on the returned task. A caller that holds
+        /// the task and awaits it later sees the exception at the call site.
+        /// The <c>VerifyAsync</c> overloads are unaffected, being async
+        /// methods that capture the exception into the task they return.
+        /// </remarks>
         /// <param name="owid"></param>
         /// <param name="crypto"></param>
         /// <param name="others"></param>

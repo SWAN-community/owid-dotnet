@@ -170,6 +170,13 @@
             <summary>
             Verify that <see cref="N:Owid"/> signature is correct.
             </summary>
+            <remarks>
+            Completes synchronously, so failures are thrown by this call
+            rather than surfacing on the returned task. A caller that holds
+            the task and awaits it later sees the exception at the call site.
+            The <c>VerifyAsync</c> overloads are unaffected, being async
+            methods that capture the exception into the task they return.
+            </remarks>
             <param name="owid"></param>
             <param name="crypto"></param>
             <param name="others"></param>
@@ -280,22 +287,6 @@
             <param name="reader"></param>
             <exception cref="T:System.Exception"></exception>
         </member>
-        <member name="T:Owid.Client.Model.ConfigurationPublicKeyStore">
-            <summary>
-            Default <see cref="T:Owid.Client.Model.IPublicKeyStore"/> backed by the single key in
-            <see cref="T:Owid.Client.Model.Configuration.OwidConfiguration"/>. A creator with one long-lived key has
-            no key history, so the date is ignored.
-            </summary>
-        </member>
-        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
-            <summary>
-            Designated constructor.
-            </summary>
-            <param name="configuration">The OWID creator configuration.</param>
-        </member>
-        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.GetPublicKey(System.Nullable{System.UInt32})">
-            <inheritdoc/>
-        </member>
         <member name="T:Owid.Client.Model.Configuration.OwidConfiguration">
             <summary>
             Configuration for <see cref="T:Owid.Client.Creator"/>
@@ -318,6 +309,22 @@
             <summary>
             The PEM format public key for the OWID creator.
             </summary>
+        </member>
+        <member name="T:Owid.Client.Model.ConfigurationPublicKeyStore">
+            <summary>
+            Default <see cref="T:Owid.Client.Model.IPublicKeyStore"/> backed by the single key in
+            <see cref="T:Owid.Client.Model.Configuration.OwidConfiguration"/>. A creator with one long-lived key has
+            no key history, so the date is ignored.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.#ctor(Owid.Client.Model.Configuration.OwidConfiguration)">
+            <summary>
+            Designated constructor.
+            </summary>
+            <param name="configuration">The OWID creator configuration.</param>
+        </member>
+        <member name="M:Owid.Client.Model.ConfigurationPublicKeyStore.GetPublicKey(System.Nullable{System.UInt32})">
+            <inheritdoc/>
         </member>
         <member name="T:Owid.Client.Model.DatedPublicKey">
             <summary>

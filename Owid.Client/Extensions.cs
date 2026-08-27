@@ -217,10 +217,67 @@ namespace Owid.Client
 			return Constants.BaseDate.AddHours(d);
 		}
 
+		/// <summary>
+		/// Reads the length-prefixed payload. The count is whatever the
+		/// sender declared, so it is checked against the bytes actually
+		/// present before anything is sized by it. A valid OWID is the
+		/// declared payload followed by the signature and nothing else, so
+		/// the count must equal the bytes remaining less the signature
+		/// length, and any other count is refused here. Until 27 August
+		/// 2026 the count went straight to ReadBytes, which allocates the
+		/// whole count before reading, so a 22 character identifier that
+		/// declared 64 MiB cost 64 MiB of allocation per request before
+		/// failing on its missing signature.
+		/// </summary>
 		private static byte[] ReadByteArray(BinaryReader reader)
 		{
 			var count = reader.ReadUInt32();
-			return reader.ReadBytes((int)count);
+			var stream = reader.BaseStream;
+			if (stream.CanSeek)
+			{
+				var remaining = stream.Length - stream.Position;
+				var expected = (long)count + Constants.SignatureLength;
+				if (remaining != expected)
+				{
+					throw new Exception(
+						$@"OWID payload length '{count}' does not match the " +
+						$@"'{remaining}' bytes present, of which the final " +
+						$@"'{Constants.SignatureLength}' must be the signature");
+				}
+				return reader.ReadBytes((int)count);
+			}
+			return ReadCounted(reader, count);
+		}
+
+		/// <summary>
+		/// The payload from a stream whose length cannot be asked for,
+		/// read in bounded pieces so nothing is allocated from the
+		/// declared count alone. The result is exactly the declared count
+		/// or the read is refused, and the signature check that follows
+		/// refuses a stream that then ends short.
+		/// </summary>
+		private static byte[] ReadCounted(BinaryReader reader, uint count)
+		{
+			const int Piece = 4096;
+			using (var collected = new MemoryStream())
+			{
+				var piece = new byte[Piece];
+				long left = count;
+				while (left > 0)
+				{
+					var read = reader.Read(
+						piece, 0, (int)Math.Min(Piece, left));
+					if (read == 0)
+					{
+						throw new Exception(
+							$@"OWID payload length '{count}' exceeds the " +
+							"bytes present");
+					}
+					collected.Write(piece, 0, read);
+					left -= read;
+				}
+				return collected.ToArray();
+			}
 		}
 
 		private static void WriteByteArray(BinaryWriter writer, byte[] array)

@@ -51,6 +51,13 @@ namespace Owid.Client
 		/// <returns></returns>
 		public static int GetByteCount(this Model.Owid owid)
 		{
+			return CalculateByteCount(owid, true);
+		}
+
+		private static int CalculateByteCount(
+			Model.Owid owid,
+			bool includeSignature)
+		{
 			int dateLength;
 			switch (owid.Version)
 			{
@@ -65,11 +72,15 @@ namespace Owid.Client
 					throw new Exception(
 						@$"OWID version '{owid.Version}' not supported");
 			}
-			return 1 +
-				ASCIIEncoding.ASCII.GetByteCount(owid.Domain) + 1 +
-				dateLength +
-				4 + owid.Payload.Length +
-				Constants.SignatureLength;
+			var byteCount =
+				1L + ASCIIEncoding.ASCII.GetByteCount(owid.Domain) + 1 +
+				dateLength + 4 + owid.Payload.LongLength +
+				(includeSignature ? Constants.SignatureLength : 0);
+			if (byteCount > Array.MaxLength)
+			{
+				throw new OwidCapacityException(byteCount);
+			}
+			return (int)byteCount;
 		}
 
 		/// <summary>
@@ -97,7 +108,7 @@ namespace Owid.Client
 		/// <returns></returns>
 		public static int GetSignedByteCount(this Model.Owid owid)
 		{
-			return owid.GetByteCount() - Constants.SignatureLength;
+			return CalculateByteCount(owid, false);
 		}
 
 		/// <summary>
@@ -244,6 +255,10 @@ namespace Owid.Client
 						$@"'{remaining}' bytes present, of which the final " +
 						$@"'{Constants.SignatureLength}' must be the signature");
 				}
+				if (count > Array.MaxLength)
+				{
+					throw new OwidCapacityException(count);
+				}
 				return reader.ReadBytes((int)count);
 			}
 			return ReadCounted(reader, count);
@@ -258,25 +273,75 @@ namespace Owid.Client
 		/// </summary>
 		private static byte[] ReadCounted(BinaryReader reader, uint count)
 		{
-			const int Piece = 4096;
-			using (var collected = new MemoryStream())
+			const int PieceLength = 4096;
+			if (count > Array.MaxLength)
 			{
-				var piece = new byte[Piece];
-				long left = count;
-				while (left > 0)
+				ReadAndDiscard(reader, count, PieceLength);
+				throw new OwidCapacityException(count);
+			}
+
+			var pieces = new List<byte[]>();
+			long left = count;
+			while (left > 0)
+			{
+				var length = (int)Math.Min(PieceLength, left);
+				var piece = new byte[length];
+				ReadExactly(reader, piece, count);
+				pieces.Add(piece);
+				left -= length;
+			}
+
+			var payload = new byte[(int)count];
+			var offset = 0;
+			foreach (var piece in pieces)
+			{
+				Buffer.BlockCopy(piece, 0, payload, offset, piece.Length);
+				offset += piece.Length;
+			}
+			return payload;
+		}
+
+		private static void ReadAndDiscard(
+			BinaryReader reader,
+			uint count,
+			int pieceLength)
+		{
+			var piece = new byte[pieceLength];
+			long left = count;
+			while (left > 0)
+			{
+				var length = (int)Math.Min(piece.Length, left);
+				ReadExactly(reader, piece, 0, length, count);
+				left -= length;
+			}
+		}
+
+		private static void ReadExactly(
+			BinaryReader reader,
+			byte[] buffer,
+			uint declaredCount)
+		{
+			ReadExactly(reader, buffer, 0, buffer.Length, declaredCount);
+		}
+
+		private static void ReadExactly(
+			BinaryReader reader,
+			byte[] buffer,
+			int offset,
+			int count,
+			uint declaredCount)
+		{
+			var end = offset + count;
+			while (offset < end)
+			{
+				var read = reader.Read(buffer, offset, end - offset);
+				if (read == 0)
 				{
-					var read = reader.Read(
-						piece, 0, (int)Math.Min(Piece, left));
-					if (read == 0)
-					{
-						throw new Exception(
-							$@"OWID payload length '{count}' exceeds the " +
-							"bytes present");
-					}
-					collected.Write(piece, 0, read);
-					left -= read;
+					throw new Exception(
+						$@"OWID payload length '{declaredCount}' exceeds " +
+						"the bytes present");
 				}
-				return collected.ToArray();
+				offset += read;
 			}
 		}
 

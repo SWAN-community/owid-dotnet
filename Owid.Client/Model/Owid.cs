@@ -90,6 +90,10 @@ namespace Owid.Client.Model
 						throw new Exception(
 							@$"OWID version '{Version}' invalid");
 				}
+				if (stream.Position != stream.Length)
+				{
+					throw new Exception("OWID contains bytes after the envelope");
+				}
 			}
         }
 

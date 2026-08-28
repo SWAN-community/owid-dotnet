@@ -231,10 +231,11 @@ namespace Owid.Client
 		/// <summary>
 		/// Reads the length-prefixed payload. The count is whatever the
 		/// sender declared, so it is checked against the bytes actually
-		/// present before anything is sized by it. A valid OWID is the
-		/// declared payload followed by the signature and nothing else, so
-		/// the count must equal the bytes remaining less the signature
-		/// length, and any other count is refused here. Until 27 August
+		/// present before anything is sized by it. The count must leave at
+		/// least the fixed signature after the payload. A public stream reader
+		/// consumes exactly one OWID and leaves any framed data after it for
+		/// its caller; top-level byte-array parsing separately requires EOF.
+		/// Until 27 August
 		/// 2026 the count went straight to ReadBytes, which allocates the
 		/// whole count before reading, so a 22 character identifier that
 		/// declared 64 MiB cost 64 MiB of allocation per request before
@@ -248,10 +249,10 @@ namespace Owid.Client
 			{
 				var remaining = stream.Length - stream.Position;
 				var expected = (long)count + Constants.SignatureLength;
-				if (remaining != expected)
+				if (remaining < expected)
 				{
 					throw new Exception(
-						$@"OWID payload length '{count}' does not match the " +
+						$@"OWID payload length '{count}' exceeds the " +
 						$@"'{remaining}' bytes present, of which the final " +
 						$@"'{Constants.SignatureLength}' must be the signature");
 				}
@@ -276,7 +277,6 @@ namespace Owid.Client
 			const int PieceLength = 4096;
 			if (count > Array.MaxLength)
 			{
-				ReadAndDiscard(reader, count, PieceLength);
 				throw new OwidCapacityException(count);
 			}
 
@@ -299,21 +299,6 @@ namespace Owid.Client
 				offset += piece.Length;
 			}
 			return payload;
-		}
-
-		private static void ReadAndDiscard(
-			BinaryReader reader,
-			uint count,
-			int pieceLength)
-		{
-			var piece = new byte[pieceLength];
-			long left = count;
-			while (left > 0)
-			{
-				var length = (int)Math.Min(piece.Length, left);
-				ReadExactly(reader, piece, 0, length, count);
-				left -= length;
-			}
 		}
 
 		private static void ReadExactly(

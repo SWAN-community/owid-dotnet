@@ -248,6 +248,42 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// The public reader consumes one OWID and leaves following framed
+        /// bytes untouched, preserving its established stream-composition
+        /// behaviour. The byte-array constructor remains strict about EOF.
+        /// </summary>
+        [TestMethod]
+        public void FromBuffer_LeavesAFollowingEnvelopeUnread()
+        {
+            var firstBytes = Envelope((uint)Payload.Length, Payload, Signature);
+            var secondBytes = Envelope(0, Array.Empty<byte>(), Signature);
+            var framed = new byte[firstBytes.Length + secondBytes.Length];
+            Array.Copy(firstBytes, framed, firstBytes.Length);
+            Array.Copy(secondBytes, 0, framed, firstBytes.Length, secondBytes.Length);
+
+            using (var stream = new MemoryStream(framed))
+            using (var reader = new BinaryReader(stream))
+            {
+                var first = new Model.Owid
+                {
+                    Version = (OwidVersion)reader.ReadByte(),
+                };
+                first.FromBuffer(reader);
+
+                Assert.AreEqual(firstBytes.Length, stream.Position);
+                CollectionAssert.AreEqual(Payload, first.Payload);
+
+                var second = new Model.Owid
+                {
+                    Version = (OwidVersion)reader.ReadByte(),
+                };
+                second.FromBuffer(reader);
+                Assert.AreEqual(framed.Length, stream.Position);
+                Assert.AreEqual(0, second.Payload.Length);
+            }
+        }
+
+        /// <summary>
         /// A read-only stream that reports it cannot seek, so the parser has
         /// to take the bounded path.
         /// </summary>

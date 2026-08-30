@@ -16,8 +16,10 @@
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Owid.Client.Model;
+using Owid.Client.Model.Configuration;
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Owid.Client.Test
@@ -33,6 +35,13 @@ namespace Owid.Client.Test
     /// gives as 255 octets on the wire less the label length octet the
     /// first label has no dot for and the zero octet for the root, neither
     /// of which has a text form.
+    ///
+    /// The same maximum binds the write, so the library cannot produce an
+    /// OWID it would itself refuse to parse. The tests below prove that a
+    /// creator takes a domain of the maximum and refuses a longer one when
+    /// it is given, that serialising refuses a longer one that arrived by
+    /// some other route, and that both refusals happen before the key is
+    /// used.
     /// </summary>
     [TestClass]
     public class DomainLengthTests
@@ -159,6 +168,110 @@ namespace Owid.Client.Test
                 CollectionAssert.AreEqual(Payload, parsed.Payload);
                 CollectionAssert.AreEqual(Signature, parsed.Signature);
             }
+        }
+
+        /// <summary>
+        /// A creator takes a domain of exactly the maximum, and the OWID it
+        /// signs serialises, parses back to the same domain and still
+        /// verifies, so the write bound refuses nothing the read accepts.
+        /// </summary>
+        [TestMethod]
+        public void CreatorDomainOfMaximumLength_SignsAndParses()
+        {
+            var domain = DomainOfLength(253);
+            using (var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+            {
+                var creator = new Creator(domain, crypto);
+                var owid = creator.Sign(Payload);
+                Assert.AreEqual(domain, owid.Domain);
+                var parsed = new Model.Owid(owid.AsByteArray());
+                Assert.AreEqual(domain, parsed.Domain);
+                Assert.AreEqual(253, parsed.Domain.Length);
+                CollectionAssert.AreEqual(Payload, parsed.Payload);
+                Assert.IsTrue(parsed.Verify(crypto));
+            }
+        }
+
+        /// <summary>
+        /// A creator domain one character over the maximum is refused where
+        /// the caller gives it, with the maximum named in the message. The
+        /// key is disposed before the creator is made, so the refusal has
+        /// to arrive before the creator tries to sign with that key,
+        /// otherwise the failure would be about the key instead.
+        /// </summary>
+        [TestMethod]
+        public void CreatorDomainOverMaximumLength_IsRefusedBeforeSigning()
+        {
+            var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            crypto.Dispose();
+            var refused = Assert.ThrowsExactly<ArgumentException>(
+                () => new Creator(DomainOfLength(254), crypto));
+            StringAssert.Contains(refused.Message, "253");
+        }
+
+        /// <summary>
+        /// The same refusal for a creator made from configuration. The
+        /// private key is empty, which the creator refuses on its own, so
+        /// the domain message rather than the key message proves the domain
+        /// is taken first.
+        /// </summary>
+        [TestMethod]
+        public void ConfigurationDomainOverMaximumLength_IsRefused()
+        {
+            var configuration = new OwidConfiguration()
+            {
+                Domain = DomainOfLength(254),
+                PrivateKey = string.Empty,
+            };
+            var refused = Assert.ThrowsExactly<ArgumentException>(
+                () => new Creator(configuration));
+            StringAssert.Contains(refused.Message, "253");
+        }
+
+        /// <summary>
+        /// A domain set straight onto an OWID never passes through a
+        /// creator, so serialising refuses it as well, and the bytes this
+        /// library would refuse to parse are never produced.
+        /// </summary>
+        [TestMethod]
+        public void SerialisedDomainOverMaximumLength_IsRefused()
+        {
+            var owid = new Model.Owid()
+            {
+                Domain = DomainOfLength(254),
+                Payload = Payload,
+                Signature = Signature,
+            };
+            var refused = Assert.ThrowsExactly<Exception>(
+                () => owid.AsByteArray());
+            StringAssert.Contains(refused.Message, "253");
+        }
+
+        /// <summary>
+        /// Signing gathers the bytes of the OWID and of the others it is
+        /// signed with before the key is used, so an other carrying a
+        /// domain over the maximum is refused before the signature is
+        /// computed. The creator's key is disposed once the creator holds
+        /// it, so reaching the signature at all would fail about the key
+        /// rather than about the domain.
+        /// </summary>
+        [TestMethod]
+        public void SigningWithOverLongOtherDomain_IsRefusedBeforeSigning()
+        {
+            var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var creator = new Creator("51d.es", crypto);
+            crypto.Dispose();
+            var other = new Model.Owid()
+            {
+                Domain = DomainOfLength(254),
+                Payload = Payload,
+                Signature = Signature,
+            };
+            var refused = Assert.ThrowsExactly<Exception>(
+                () => creator.Sign(
+                    new Model.Owid() { Payload = Payload },
+                    other));
+            StringAssert.Contains(refused.Message, "253");
         }
     }
 }

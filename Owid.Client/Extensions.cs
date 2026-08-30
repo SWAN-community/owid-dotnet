@@ -320,8 +320,24 @@ namespace Owid.Client
 			return ASCIIEncoding.ASCII.GetString(domain, 0, length);
 		}
 
+		/// <summary>
+		/// Writes the creator domain as ASCII text followed by the zero
+		/// terminator the read stops at. A domain longer than the maximum
+		/// the read accepts is refused here, so the library cannot write an
+		/// OWID that this same library would then refuse to parse. Until 30
+		/// August 2026 only the read was bounded, so a creator configured
+		/// with a longer domain produced an OWID whose fault surfaced at
+		/// the consumer rather than at the creator that made it.
+		/// </summary>
 		private static void WriteString(BinaryWriter writer, string value)
 		{
+			if (value.Length > Constants.MaximumDomainLength)
+			{
+				throw new Exception(
+					$@"OWID domain of '{value.Length}' characters is longer " +
+					$@"than the '{Constants.MaximumDomainLength}' characters " +
+					"a domain can have");
+			}
 			writer.Write(ASCIIEncoding.ASCII.GetBytes(value));
 			writer.Write((byte)0);
 		}

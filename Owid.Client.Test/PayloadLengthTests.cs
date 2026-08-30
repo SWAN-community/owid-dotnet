@@ -84,6 +84,21 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// A payload materially larger than an ordinary identifier remains
+        /// valid when its declaration and bytes agree. This guards against
+        /// turning an application policy into a format restriction.
+        /// </summary>
+        [TestMethod]
+        public void MatchingOneMebibytePayload_Parses()
+        {
+            var payload = Filled(1024 * 1024, 0x5A);
+            var owid = new Model.Owid(
+                Envelope((uint)payload.Length, payload, Signature));
+
+            CollectionAssert.AreEqual(payload, owid.Payload);
+        }
+
+        /// <summary>
         /// A round trip through the library's own writer still parses, so
         /// the check agrees with what the library itself produces.
         /// </summary>
@@ -143,13 +158,15 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// A declared length far beyond the bytes present is refused without
-        /// an allocation sized by the declared number. The envelope is a
-        /// few dozen bytes and declares 64 MiB, then 2 GiB, then more than
-        /// an int can hold, and each parse allocates under 64 KiB.
+        /// A large declaration whose payload bytes are absent is refused
+        /// without an allocation sized by the declared number. The envelope
+        /// is a few dozen bytes while declaring 64 MiB, then 2 GiB, then
+        /// more than an int can hold, and each parse allocates under 64 KiB.
+        /// The numeric values remain valid when the matching payload is
+        /// present.
         /// </summary>
         [TestMethod]
-        public void HugeDeclaredLength_IsRefusedWithoutAllocating()
+        public void MismatchedLargeDeclaration_IsRefusedWithoutAllocating()
         {
             foreach (var declared in new uint[]
             {
@@ -188,15 +205,82 @@ namespace Owid.Client.Test
             }
             CollectionAssert.AreEqual(Payload, parsed.Payload);
 
-            var huge = Envelope(64u * 1024 * 1024, Array.Empty<byte>(), Array.Empty<byte>());
+            var mismatched = Envelope(
+                64u * 1024 * 1024,
+                Array.Empty<byte>(),
+                Array.Empty<byte>());
             var before = GC.GetAllocatedBytesForCurrentThread();
-            using (var reader = new BinaryReader(new ForwardOnlyStream(huge)))
+            using (var reader = new BinaryReader(
+                new ForwardOnlyStream(mismatched)))
             {
                 var owid = new Model.Owid { Version = (OwidVersion)reader.ReadByte() };
                 Assert.ThrowsExactly<Exception>(() => owid.FromBuffer(reader));
             }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.IsTrue(allocated < 64 * 1024, $"allocated {allocated} bytes");
+        }
+
+        /// <summary>
+        /// A matching payload from a forward-only source is collected in
+        /// fixed pieces and copied once into its final array. The allocation
+        /// stays close to twice the actual payload size and does not include
+        /// MemoryStream growth plus a further ToArray copy.
+        /// </summary>
+        [TestMethod]
+        public void NonSeekableLargePayload_AvoidsGrowingBufferCopy()
+        {
+            var payload = Filled(1024 * 1024, 0x5A);
+            var bytes = Envelope((uint)payload.Length, payload, Signature);
+            var parsed = new Model.Owid();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            using (var reader = new BinaryReader(new ForwardOnlyStream(bytes)))
+            {
+                parsed.Version = (OwidVersion)reader.ReadByte();
+                parsed.FromBuffer(reader);
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            CollectionAssert.AreEqual(payload, parsed.Payload);
+            Assert.IsTrue(
+                allocated < 2300L * 1024,
+                $"reading {payload.Length} bytes allocated {allocated} bytes");
+        }
+
+        /// <summary>
+        /// The public reader consumes one OWID and leaves following framed
+        /// bytes untouched, preserving its established stream-composition
+        /// behaviour. The byte-array constructor remains strict about EOF.
+        /// </summary>
+        [TestMethod]
+        public void FromBuffer_LeavesAFollowingEnvelopeUnread()
+        {
+            var firstBytes = Envelope((uint)Payload.Length, Payload, Signature);
+            var secondBytes = Envelope(0, Array.Empty<byte>(), Signature);
+            var framed = new byte[firstBytes.Length + secondBytes.Length];
+            Array.Copy(firstBytes, framed, firstBytes.Length);
+            Array.Copy(secondBytes, 0, framed, firstBytes.Length, secondBytes.Length);
+
+            using (var stream = new MemoryStream(framed))
+            using (var reader = new BinaryReader(stream))
+            {
+                var first = new Model.Owid
+                {
+                    Version = (OwidVersion)reader.ReadByte(),
+                };
+                first.FromBuffer(reader);
+
+                Assert.AreEqual(firstBytes.Length, stream.Position);
+                CollectionAssert.AreEqual(Payload, first.Payload);
+
+                var second = new Model.Owid
+                {
+                    Version = (OwidVersion)reader.ReadByte(),
+                };
+                second.FromBuffer(reader);
+                Assert.AreEqual(framed.Length, stream.Position);
+                Assert.AreEqual(0, second.Payload.Length);
+            }
         }
 
         /// <summary>

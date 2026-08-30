@@ -16,9 +16,7 @@
 
 using Owid.Client.Model;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 
 namespace Owid.Client
@@ -286,26 +284,40 @@ namespace Owid.Client
 			writer.Write(array);
 		}
 
+		/// <summary>
+		/// Reads the creator domain, being the ASCII bytes up to the zero
+		/// terminator. The terminator is whatever the sender put there, so
+		/// the walk stops at Constants.MaximumDomainLength rather than at
+		/// the end of the buffer, and a domain that is longer than that, or
+		/// that has no terminator inside it, is refused without reading any
+		/// further. Until 30 August 2026 a missing or corrupted terminator
+		/// sent the walk to the end of the buffer and collected every byte
+		/// it passed, so the work a hostile envelope could ask for grew
+		/// with the bytes it sent rather than being fixed by the published
+		/// maximum for a domain.
+		/// </summary>
 		private static string ReadString(BinaryReader reader)
 		{
-			return ASCIIEncoding.ASCII.GetString(
-				ReadBytes(reader, 0).ToArray());
-		}
-
-		private static IEnumerable<byte> ReadBytes(
-			BinaryReader reader,
-			byte stop)
-		{
-			byte value = stop;
-			do
+			var domain = new byte[Constants.MaximumDomainLength];
+			var length = 0;
+			while (length < Constants.MaximumDomainLength)
 			{
-				value = reader.ReadByte();
-				if (value == stop)
+				var value = reader.ReadByte();
+				if (value == 0)
 				{
-					break;
+					return ASCIIEncoding.ASCII.GetString(domain, 0, length);
 				}
-				yield return value;
-			} while (value != stop);
+				domain[length] = value;
+				length++;
+			}
+			if (reader.ReadByte() != 0)
+			{
+				throw new Exception(
+					"OWID domain is longer than the " +
+					$@"'{Constants.MaximumDomainLength}' characters a domain " +
+					"can have, or is missing its terminator");
+			}
+			return ASCIIEncoding.ASCII.GetString(domain, 0, length);
 		}
 
 		private static void WriteString(BinaryWriter writer, string value)

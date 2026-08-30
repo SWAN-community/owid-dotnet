@@ -206,6 +206,27 @@
             <param name="others"></param>
             <returns></returns>
         </member>
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
+            <summary>
+            Says whether the signature is genuine, or why that could not be
+            decided.
+            </summary>
+            <remarks>
+            Only two of the answers are about the signature. The rest say the
+            question could not be answered, which is a different thing and must
+            never be reported as a forgery. A key that cannot be decoded leaves
+            the signature unjudged, and a caller acting on "invalid" would
+            reject good identifiers during an outage. On 30 August 2026 the key
+            endpoints served PEM a strict parser rejects and every offline
+            verification failed, with the keys and the identifiers both fine.
+            </remarks>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[])">
+            <summary>
+            Says whether the signature is genuine using the public key in PEM
+            form, or why that could not be decided.
+            </summary>
+        </member>
         <member name="M:Owid.Client.CryptoExtensions.Verify(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
             <summary>
             Verify that <see cref="N:Owid"/> signature is correct without any

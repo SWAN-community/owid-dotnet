@@ -63,35 +63,30 @@ namespace Owid.Client
             }
 
             var at = 0;
-            if (Remaining(buffer, at) < 1)
+            if (buffer.Length == 0)
             {
-                return OwidParseStatus.UnexpectedEnd;
+                // Nothing was supplied, which is not the same as data that
+                // stopped part way through a field.
+                return OwidParseStatus.MissingInput;
             }
 
             var version = (OwidVersion)buffer[at++];
             switch (version)
             {
-                case OwidVersion.Empty:
-                    // An empty OWID is the version byte and nothing else, so
-                    // anything after it belongs to no field.
-                    if (at != buffer.Length)
-                    {
-                        return OwidParseStatus.MalformedEnvelope;
-                    }
-                    owid = Model.Owid.CreateForParser(
-                        version,
-                        string.Empty,
-                        Constants.BaseDate,
-                        Array.Empty<byte>(),
-                        Array.Empty<byte>());
-                    return OwidParseStatus.Parsed;
-
                 case OwidVersion.Version1:
                 case OwidVersion.Version2:
                 case OwidVersion.Version3:
                     break;
 
                 default:
+                    // Version 0 is the empty marker, written into a stream to
+                    // stand for an absent node in a tree. It carries no
+                    // domain, date, payload or signature, so it is not an
+                    // OWID and can never verify. Accepting one here would hand
+                    // a caller something that looks like an identifier and is
+                    // not, which is exactly what closing construction is meant
+                    // to prevent. Framed reading still deals with the marker
+                    // where it belongs, inside a stream.
                     return OwidParseStatus.UnsupportedVersion;
             }
 

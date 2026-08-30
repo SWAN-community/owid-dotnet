@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -181,11 +181,12 @@ namespace Owid.Client.Test
 
         /// <summary>
         /// Test that an empty OWID marker written with
-        /// <see cref="Extensions.EmptyToBuffer(BinaryWriter)"/> reads back as
-        /// an empty OWID with default field values.
+        /// <see cref="Extensions.EmptyToBuffer(BinaryWriter)"/> writes a
+        /// single zero byte, and that byte is refused when read as a whole
+        /// OWID.
         /// </summary>
         [TestMethod]
-        public void TestEmptyOwidMarkerRoundtrip()
+        public void TestEmptyOwidMarkerIsNotAnOwid()
         {
             byte[] bytes;
             using (var stream = new MemoryStream())
@@ -201,11 +202,12 @@ namespace Owid.Client.Test
             Assert.AreEqual(1, bytes.Length);
             Assert.AreEqual(0, bytes[0]);
 
-            var owid = TestOwid.Parse(bytes);
-            Assert.AreEqual(OwidVersion.Empty, owid.Version);
-            Assert.AreEqual(string.Empty, owid.Domain);
-            Assert.AreEqual(0, owid.Payload.Length);
-            Assert.AreEqual(0, owid.Signature.Length);
+            // The marker stands for an absent node inside a stream. It is not
+            // an OWID: it carries no domain, date, payload or signature, so it
+            // can never verify. Reading one from a buffer would hand a caller
+            // the one thing the construction boundary exists to prevent, an
+            // instance with no signature that looks like an identifier.
+            TestOwid.AssertRefused(bytes, OwidParseStatus.UnsupportedVersion);
         }
 
         private async Task TestVersionRoundtrip(OwidVersion version)

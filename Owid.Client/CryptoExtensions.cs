@@ -21,6 +21,7 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Owid.Client.Model;
 
 namespace Owid.Client
 {
@@ -107,6 +108,83 @@ namespace Owid.Client
         {
 			return await owid.VerifyAsyncWithOthers(crypto, others);
 		}
+
+        /// <summary>
+        /// Says whether the signature is genuine, or why that could not be
+        /// decided.
+        /// </summary>
+        /// <remarks>
+        /// Only two of the answers are about the signature. The rest say the
+        /// question could not be answered, which is a different thing and must
+        /// never be reported as a forgery. A key that cannot be decoded leaves
+        /// the signature unjudged, and a caller acting on "invalid" would
+        /// reject good identifiers during an outage. On 30 August 2026 the key
+        /// endpoints served PEM a strict parser rejects and every offline
+        /// verification failed, with the keys and the identifiers both fine.
+        /// </remarks>
+        public static OwidSignatureStatus SignatureStatus(
+            this Model.Owid owid,
+            ECDsa crypto,
+            params Model.Owid[] others)
+        {
+            if (owid == null)
+            {
+                throw new ArgumentNullException(nameof(owid));
+            }
+            if (crypto == null)
+            {
+                return OwidSignatureStatus.KeyUnavailable;
+            }
+            if (owid.Signature.Length != Constants.SignatureLength)
+            {
+                return OwidSignatureStatus.InvalidSignatureLength;
+            }
+            try
+            {
+                return owid.Verify(crypto, others)
+                    ? OwidSignatureStatus.SignatureValid
+                    : OwidSignatureStatus.SignatureInvalid;
+            }
+            catch (CryptographicException)
+            {
+                // The provider failed on inputs that were themselves fine.
+                return OwidSignatureStatus.VerificationError;
+            }
+        }
+
+        /// <summary>
+        /// Says whether the signature is genuine using the public key in PEM
+        /// form, or why that could not be decided.
+        /// </summary>
+        public static OwidSignatureStatus SignatureStatus(
+            this Model.Owid owid,
+            string publicKeyPem,
+            params Model.Owid[] others)
+        {
+            if (string.IsNullOrEmpty(publicKeyPem))
+            {
+                return OwidSignatureStatus.KeyUnavailable;
+            }
+            ECDsa crypto;
+            try
+            {
+                crypto = ECDsa.Create();
+                crypto.ImportFromPem(publicKeyPem);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException ||
+                ex is CryptographicException ||
+                ex is FormatException)
+            {
+                // The key is the thing at fault, not the identifier. This is
+                // the case that happened: PEM a strict parser rejects.
+                return OwidSignatureStatus.InvalidKey;
+            }
+            using (crypto)
+            {
+                return owid.SignatureStatus(crypto, others);
+            }
+        }
 
         /// <summary>
         /// Verify that <see cref="Owid"/> signature is correct without any

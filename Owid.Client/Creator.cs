@@ -100,7 +100,7 @@ namespace Owid.Client
         /// </summary>
         /// <param name="owid"></param>
         /// <returns></returns>
-        public Model.Owid Sign(Model.Owid owid)
+        internal Model.Owid Sign(Model.Owid owid)
         {
             return SignWithOthers(owid, Constants.Empty);
         }
@@ -111,7 +111,7 @@ namespace Owid.Client
         /// <param name="owid"></param>
         /// <param name="others"></param>
         /// <returns></returns>
-        public Model.Owid Sign(
+        internal Model.Owid Sign(
             Model.Owid owid,
             params Model.Owid[] others)
         {
@@ -124,19 +124,19 @@ namespace Owid.Client
         /// <param name="owid"></param>
         /// <param name="others"></param>
         /// <returns></returns>
-        public Model.Owid SignWithOthers(
+        internal Model.Owid SignWithOthers(
             Model.Owid owid,
             Model.Owid[] others)
         {
             owid.Domain = Domain;
             owid.Date = DateTime.UtcNow;
             var data = owid.GetDataForCrypto(others);
-            owid.Signature = Crypto.SignData(
+            owid.SignatureInternal = Crypto.SignData(
                 data,
                 0,
                 data.Length,
                 HashAlgorithmName.SHA256);
-            if (owid.Signature.Length != Constants.SignatureLength)
+            if (owid.SignatureInternal.Length != Constants.SignatureLength)
             {
                 throw new Exception(
                     $@"Signatures must be '{Constants.SignatureLength}' " +
@@ -151,9 +151,13 @@ namespace Owid.Client
         /// </summary>
         /// <param name="value">Payload value</param>
         /// <returns>Signed OWID with payload provided.</returns>
-        public Model.Owid Sign(string value)
+        public Model.Owid Create(string value)
         {
-            return Sign(ASCIIEncoding.ASCII.GetBytes(value));
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+            return Create(ASCIIEncoding.ASCII.GetBytes(value));
         }
 
         /// <summary>
@@ -162,11 +166,36 @@ namespace Owid.Client
         /// </summary>
         /// <param name="value">Payload value</param>
         /// <returns>Signed OWID with payload provided.</returns>
-        public Model.Owid Sign(byte[] value)
+        public Model.Owid Create(byte[] value)
         {
+            return Create(value, Constants.Empty);
+        }
+
+        /// <summary>
+        /// Creates and signs an OWID carrying the value, with the other OWIDs
+        /// covered by the signature so that a tree can be verified as a whole.
+        /// </summary>
+        /// <param name="value">Payload value</param>
+        /// <param name="others">
+        /// OWIDs this one is signed alongside.
+        /// </param>
+        /// <returns>Signed OWID with the payload provided.</returns>
+        /// <remarks>
+        /// This is one of only two ways an OWID reaches calling code, the
+        /// other being a successful parse. The creator owns the version, the
+        /// domain, the date and the signature; a caller supplies the payload
+        /// and nothing else, so there is no moment at which a partly built
+        /// OWID exists for anyone to hold or pass on.
+        /// </remarks>
+        public Model.Owid Create(byte[] value, params Model.Owid[] others)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
             var owid = new Model.Owid();
-            owid.Payload = value;
-            return Sign(owid);
+            owid.PayloadInternal = (byte[])value.Clone();
+            return SignWithOthers(owid, others ?? Constants.Empty);
         }
 
         /// <summary>

@@ -158,7 +158,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestInteropRustChainFailsWithoutRoot()
         {
-            var party = new Model.Owid(RustChainParty);
+            var party = TestOwid.Parse(RustChainParty);
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(RustPublicPem);
@@ -182,7 +182,7 @@ namespace Owid.Client.Test
             await AssertTamperedFailsAsync(
                 RustPublicPem,
                 RustChainParty,
-                new Model.Owid(RustChainRoot));
+                TestOwid.Parse(RustChainRoot));
         }
 
         /// <summary>
@@ -242,7 +242,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestInteropGoChainFailsWithoutRoot()
         {
-            var party = new Model.Owid(GoChainParty);
+            var party = TestOwid.Parse(GoChainParty);
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(GoPublicPem);
@@ -266,7 +266,7 @@ namespace Owid.Client.Test
             await AssertTamperedFailsAsync(
                 GoPublicPem,
                 GoChainParty,
-                new Model.Owid(GoChainRoot));
+                TestOwid.Parse(GoChainRoot));
         }
 
         /// <summary>
@@ -297,7 +297,7 @@ namespace Owid.Client.Test
             string publicPem,
             string base64)
         {
-            var owid = new Model.Owid(base64);
+            var owid = TestOwid.Parse(base64);
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(publicPem);
@@ -314,8 +314,8 @@ namespace Owid.Client.Test
             string party,
             string root)
         {
-            var partyOwid = new Model.Owid(party);
-            var rootOwid = new Model.Owid(root);
+            var partyOwid = TestOwid.Parse(party);
+            var rootOwid = TestOwid.Parse(root);
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(publicPem);
@@ -342,7 +342,7 @@ namespace Owid.Client.Test
             var bytes = Convert.FromBase64String(base64);
             bytes[bytes.Length - 1] = (byte)(bytes[bytes.Length - 1] ^ 0xFF);
 
-            var owid = new Model.Owid(bytes);
+            var owid = TestOwid.Parse(bytes);
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(publicPem);
@@ -357,7 +357,7 @@ namespace Owid.Client.Test
         /// </summary>
         private static void AssertUtf8Payload(string base64)
         {
-            var owid = new Model.Owid(base64);
+            var owid = TestOwid.Parse(base64);
             Assert.AreEqual(Utf8Text, Encoding.UTF8.GetString(owid.Payload));
         }
 
@@ -369,7 +369,7 @@ namespace Owid.Client.Test
         {
             foreach (var base64 in fixtures)
             {
-                var owid = new Model.Owid(base64);
+                var owid = TestOwid.Parse(base64);
                 Assert.AreEqual(base64, owid.AsBase64());
             }
         }

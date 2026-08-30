@@ -182,8 +182,8 @@ namespace Owid.Client
 				throw new Exception("OWID must contain valid date");
 			}
 			owid.Date = date.Value;
-			owid.Payload = ReadByteArray(reader);
-			owid.Signature = ReadSignature(reader);
+			owid.PayloadInternal = ReadByteArray(reader);
+			owid.SignatureInternal = ReadSignature(reader);
 		}
 
 		internal static void ToBufferNoSignature(

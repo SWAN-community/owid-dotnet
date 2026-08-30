@@ -33,6 +33,20 @@ namespace Owid.Client
 		internal const int SignatureLength = 64;
 
 		/// <summary>
+		/// The greatest number of characters a creator domain can have.
+		/// RFC 1035 section 2.3.4 "Size limits" says that "the total length
+		/// of a domain name (i.e., label octets and label length octets) is
+		/// restricted to 255 octets or less". Those 255 octets are the wire
+		/// format, which spends one length octet on every label and one zero
+		/// octet on the root, whereas an OWID stores the presentation form,
+		/// the text "example.com", where a dot stands in for every label
+		/// length octet apart from the first, which has no dot in front of
+		/// it, and the root octet has no text form at all, so the same limit
+		/// is 253 characters once those two octets are taken away.
+		/// </summary>
+		internal const int MaximumDomainLength = 253;
+
+		/// <summary>
 		/// Used when cryptographic operations are required where there is no
 		/// other data to be considered.
 		/// </summary>

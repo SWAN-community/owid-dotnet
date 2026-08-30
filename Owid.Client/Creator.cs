@@ -47,10 +47,14 @@ namespace Owid.Client
         /// <exception cref="ArithmeticException">
         /// <paramref name="configuration"/>.<see cref="OwidConfiguration.Domain"/> is empty or whitespace.
         /// </exception>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="configuration"/>.<see cref="OwidConfiguration.Domain"/> is longer than a domain can be.
+        /// </exception>
         public Creator(OwidConfiguration configuration)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(
                 configuration.Domain);
+            ValidateDomain(configuration.Domain, nameof(configuration));
             Domain = configuration.Domain;
 
             // Reject an empty or whitespace PEM with a clear message rather
@@ -80,8 +84,12 @@ namespace Owid.Client
         /// <exception cref="ArgumentNullException">
         ///   <paramref name="crypto" />'s <see cref="HashAlgorithmName.Name" /> is <see langword="null" />.
         /// </exception>
+        /// <exception cref="ArgumentException">
+        ///   <paramref name="domain" /> is longer than a domain can be.
+        /// </exception>
         public Creator(string domain, ECDsa crypto)
         {
+            ValidateDomain(domain, nameof(domain));
             Domain = domain;
             ValidateCrypto(crypto);
             Crypto = crypto;
@@ -159,6 +167,31 @@ namespace Owid.Client
             var owid = new Model.Owid();
             owid.Payload = value;
             return Sign(owid);
+        }
+
+        /// <summary>
+        /// Refuses a creator domain longer than the maximum a domain can
+        /// have, being the same maximum the envelope read uses, at the
+        /// point the caller supplies the domain. Taking the domain here
+        /// means the caller is told where they gave the value, before any
+        /// key is used and before anything is signed or serialised, rather
+        /// than at the consumer that later cannot parse the result. The
+        /// serialisation of the domain refuses the same value again, so a
+        /// domain that arrives by some other route is still refused. A
+        /// domain at or under the maximum, and an absent domain, behave
+        /// exactly as they did before.
+        /// </summary>
+        private static void ValidateDomain(string domain, string parameterName)
+        {
+            if (domain is not null &&
+                domain.Length > Constants.MaximumDomainLength)
+            {
+                throw new ArgumentException(
+                    $@"Creator domain of '{domain.Length}' characters is " +
+                    $@"longer than the '{Constants.MaximumDomainLength}' " +
+                    "characters a domain can have",
+                    parameterName);
+            }
         }
 
         private static void ValidateCrypto(ECDsa crypto)

@@ -28,6 +28,18 @@ namespace Owid.Client
 			2020, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
 
 		/// <summary>
+		/// The largest count of minutes after <see cref="BaseDate"/> that a
+		/// <see cref="DateTime"/> can hold, which is 4,197,074,399 and lands
+		/// on 9999-12-31 23:59. The four byte count in versions 2 and 3 runs
+		/// to 4,294,967,295, which is 15 February 10186, so a count above
+		/// this is one the wire format allows and this runtime cannot
+		/// represent. Derived from <see cref="DateTime.MaxValue"/> rather
+		/// than written as a number so it cannot drift from the runtime.
+		/// </summary>
+		internal static readonly uint MaximumMinutes = (uint)(
+			(DateTime.MaxValue - BaseDate).Ticks / TimeSpan.TicksPerMinute);
+
+		/// <summary>
 		/// The length of an OWID signature in bytes. 
 		/// </summary>
 		internal const int SignatureLength = 64;

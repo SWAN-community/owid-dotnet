@@ -64,16 +64,13 @@ namespace Owid.Client.Model
                 return _keysNewestFirst.FirstOrDefault()?.PublicKey;
             }
 
-            DateTime requested;
-            try
-            {
-                requested = Constants.BaseDate.AddMinutes(dateMinutes.Value);
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                // A date beyond the representable range is after every key.
-                requested = DateTime.MaxValue;
-            }
+            // A date past the end of 9999 is after every key. Judged before
+            // the arithmetic rather than caught after it, because AddMinutes
+            // throws on such a count and the exception is a cost the caller
+            // of the end point chooses.
+            var requested = dateMinutes.Value > Constants.MaximumMinutes
+                ? DateTime.MaxValue
+                : Constants.BaseDate.AddMinutes(dateMinutes.Value);
 
             return _keysNewestFirst
                 .FirstOrDefault(k => k.Created <= requested)?.PublicKey;

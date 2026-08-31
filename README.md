@@ -168,7 +168,7 @@ justify it have arrived.
 | `UnexpectedEnd` | The data stopped in the middle of a field. |
 | `InvalidDomainEncoding` | The domain is not terminated, or is too long. |
 | `ByteCountMismatch` | The declared payload count disagrees with the bytes present. |
-| `ImplementationCapacityExceeded` | Valid, but larger than this runtime can hold. |
+| `ImplementationCapacityExceeded` | Valid, but larger than this runtime can hold, or dated past the end of 9999 where `DateTime` stops. |
 | `MalformedEnvelope` | Malformed in a way none of the above describes. |
 | `AbsentNode` | The version 0 marker, which stands for an absent node. |
 

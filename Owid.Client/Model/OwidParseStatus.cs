@@ -87,6 +87,13 @@ namespace Owid.Client.Model
         /// deliberately distinct from the data being wrong, because the same
         /// bytes may be readable elsewhere.
         /// </summary>
+        /// <remarks>
+        /// Produced by a declared payload larger than an array can hold, and
+        /// by a date past the end of the year 9999, where
+        /// <see cref="System.DateTime"/> stops while the four byte minute
+        /// count of versions 2 and 3 runs to 15 February 10186. The date is
+        /// judged before the arithmetic, so a read never throws on it.
+        /// </remarks>
         ImplementationCapacityExceeded = 8,
 
         /// <summary>

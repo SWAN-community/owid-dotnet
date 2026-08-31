@@ -119,13 +119,26 @@ namespace Owid.Client.Test
             Assert.AreEqual(OwidParseStatus.InvalidBase64, encoded);
             ReachedParse.Add(encoded);
 
-            // Reachable only on the framed read. The whole buffer contract
+            // Two things produce this. A date past the end of 9999, which
+            // DateTime cannot hold while the wire's four byte minute count
+            // runs to the year 10186, is refused on both contracts, and the
+            // boundary is pinned in DateRangeTests. The date bytes follow the
+            // version byte and the terminated domain.
+            var dated = (byte[])good.Clone();
+            var dateAt = 1 + TestDomain.Length + 1;
+            for (var i = 0; i < 4; i++)
+            {
+                dated[dateAt + i] = 0xFF;
+            }
+            Refuse(dated, OwidParseStatus.ImplementationCapacityExceeded);
+
+            // A payload declaration above the runtime's maximum array length
+            // is reachable only on the framed read. The whole buffer contract
             // refuses the declaration first, because a byte array can never
-            // hold more than the runtime's maximum array length, so a
-            // declaration above it always disagrees with the bytes present.
-            // A stream has no such ceiling on what it might deliver, so the
-            // declaration is judged on its own before anything is sized by
-            // it.
+            // hold more than that length, so a declaration above it always
+            // disagrees with the bytes present. A stream has no such ceiling
+            // on what it might deliver, so the declaration is judged on its
+            // own before anything is sized by it.
             var head = new byte[] { (byte)OwidVersion.Version3, (byte)'a', 0 }
                 .Concat(new byte[] { 0, 0, 0, 0 })
                 .Concat(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF })

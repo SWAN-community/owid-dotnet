@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -95,5 +95,21 @@ namespace Owid.Client.Model
         /// naming a failure that is already understood.
         /// </summary>
         MalformedEnvelope = 9,
+
+        /// <summary>
+        /// The version 0 marker, which stands for an absent node inside a
+        /// stream.
+        /// </summary>
+        /// <remarks>
+        /// It is not an OWID and never produces one, because it carries no
+        /// signature and so can never verify. A framed read reports it and
+        /// moves past its one byte, so a caller walking a run of frames can
+        /// tell an absent node from a malformed one, which is the distinction
+        /// the marker exists for. The whole buffer read reports it too,
+        /// because the byte means the same thing wherever it appears. Calling
+        /// it an unsupported version was inaccurate, since version 0 is
+        /// supported and meaningful, it simply is not an OWID.
+        /// </remarks>
+        AbsentNode = 10,
     }
 }

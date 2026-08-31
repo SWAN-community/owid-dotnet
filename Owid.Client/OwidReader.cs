@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -78,15 +78,16 @@ namespace Owid.Client
                 case OwidVersion.Version3:
                     break;
 
+                case OwidVersion.Empty:
+                    // The marker stands for an absent node inside a stream,
+                    // which is what framed reading is for. It carries no
+                    // domain, date, payload or signature, so no value is
+                    // handed back, but it is named for what it is rather than
+                    // called an unsupported version, because version 0 is
+                    // supported and meaningful and simply is not an OWID.
+                    return OwidParseStatus.AbsentNode;
+
                 default:
-                    // Version 0 is the empty marker, written into a stream to
-                    // stand for an absent node in a tree. It carries no
-                    // domain, date, payload or signature, so it is not an
-                    // OWID and can never verify. Accepting one here would hand
-                    // a caller something that looks like an identifier and is
-                    // not, which is exactly what closing construction is meant
-                    // to prevent. Framed reading still deals with the marker
-                    // where it belongs, inside a stream.
                     return OwidParseStatus.UnsupportedVersion;
             }
 

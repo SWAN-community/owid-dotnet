@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -82,6 +82,62 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// The version 0 marker stands for an absent node inside a stream, so
+        /// a run of envelopes with a gap in it reads back as an envelope, an
+        /// absent node, and the next envelope. Getting this wrong stops the
+        /// walk dead, because a caller that cannot tell a gap from rubbish has
+        /// no way to reach whatever follows the gap.
+        /// </summary>
+        [TestMethod]
+        public void AMarkerIsSteppedOverAndTheNextEnvelopeIsRead()
+        {
+            var first = Create(new byte[] { 1, 2, 3 }).AsByteArray();
+            var second = Create(new byte[] { 4, 5 }).AsByteArray();
+            using var stream = new MemoryStream(first
+                .Concat(new byte[] { (byte)OwidVersion.Empty })
+                .Concat(second)
+                .ToArray());
+
+            Assert.IsTrue(
+                Model.Owid.TryRead(stream, out var one, out var firstStatus));
+            Assert.AreEqual(OwidParseStatus.Parsed, firstStatus);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, one!.Payload);
+
+            // The marker is named for what it is, and no value comes back
+            // because it carries no signature and could never verify.
+            Assert.IsFalse(
+                Model.Owid.TryRead(stream, out var gap, out var gapStatus));
+            Assert.IsNull(gap);
+            Assert.AreEqual(OwidParseStatus.AbsentNode, gapStatus);
+
+            // Its one byte has been taken, so the next read starts on the next
+            // envelope rather than part way into it.
+            Assert.IsTrue(
+                Model.Owid.TryRead(stream, out var two, out var secondStatus));
+            Assert.AreEqual(OwidParseStatus.Parsed, secondStatus);
+            CollectionAssert.AreEqual(new byte[] { 4, 5 }, two!.Payload);
+        }
+
+        /// <summary>
+        /// Two markers in a row are two absent nodes, not one.
+        /// </summary>
+        [TestMethod]
+        public void TwoMarkersInARowAreTwoAbsentNodes()
+        {
+            using var stream = new MemoryStream(new byte[] { 0, 0 });
+            for (var i = 0; i < 2; i++)
+            {
+                Assert.IsFalse(
+                    Model.Owid.TryRead(stream, out var owid, out var status));
+                Assert.IsNull(owid);
+                Assert.AreEqual(OwidParseStatus.AbsentNode, status);
+            }
+            Assert.IsFalse(
+                Model.Owid.TryRead(stream, out _, out var endStatus));
+            Assert.AreEqual(OwidParseStatus.MissingInput, endStatus);
+        }
+
+        /// <summary>
         /// The same two envelopes are not one whole OWID. This is the single
         /// place the two contracts differ: in a buffer nothing else could own
         /// the trailing bytes, so they are a disagreement, while in a stream
@@ -102,7 +158,10 @@ namespace Owid.Client.Test
 
         /// <summary>
         /// A stream that stops before the signature is refused, and says the
-        /// declaration and the data disagree.
+        /// data ended early rather than that a declaration disagreed with data
+        /// that is all present. On this contract nothing can be said about a
+        /// disagreement, because what follows is not the parse's to judge, so
+        /// the only certain fact is that the declared bytes never arrived.
         /// </summary>
         [TestMethod]
         public void AStreamThatStopsBeforeTheSignatureIsRefused()
@@ -114,7 +173,10 @@ namespace Owid.Client.Test
             Assert.IsFalse(
                 Model.Owid.TryRead(stream, out var owid, out var status));
             Assert.IsNull(owid);
-            Assert.AreEqual(OwidParseStatus.ByteCountMismatch, status);
+            // Data stopping early, not a declaration disagreeing with data
+            // that is all present. A caller reading from a source still
+            // arriving needs to know whether waiting would help.
+            Assert.AreEqual(OwidParseStatus.UnexpectedEnd, status);
         }
 
         /// <summary>
@@ -156,7 +218,7 @@ namespace Owid.Client.Test
                 Assert.IsFalse(
                     Model.Owid.TryRead(stream, out var owid, out var status));
                 Assert.IsNull(owid);
-                Assert.AreEqual(OwidParseStatus.ByteCountMismatch, status);
+                Assert.AreEqual(OwidParseStatus.UnexpectedEnd, status);
             }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 

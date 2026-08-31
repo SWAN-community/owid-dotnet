@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -79,11 +79,10 @@ namespace Owid.Client.Test
 
             Refuse(Array.Empty<byte>(), OwidParseStatus.MissingInput);
 
-            // Version 0 stands for an absent node inside a stream. It carries
-            // no domain, date, payload or signature, so it can never verify,
-            // and letting one through would be the single case of an instance
-            // with no signature reaching a caller.
-            Refuse(new byte[] { 0 }, OwidParseStatus.UnsupportedVersion);
+            // Version 0 stands for an absent node inside a stream. It
+            // carries no signature so no value is handed back, and it is
+            // named for what it is rather than called an unsupported version.
+            Refuse(new byte[] { 0 }, OwidParseStatus.AbsentNode);
 
             var unknown = (byte[])good.Clone();
             unknown[0] = 9;

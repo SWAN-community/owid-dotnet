@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -75,9 +75,13 @@ namespace Owid.Client
                 case OwidVersion.Version2:
                 case OwidVersion.Version3:
                     break;
+                case OwidVersion.Empty:
+                    // An absent node. No value is handed back, and the one
+                    // byte has already been taken from the stream, so a caller
+                    // walking a run of frames reads the next one next.
+                    return OwidParseStatus.AbsentNode;
+
                 default:
-                    // Version 0, the empty marker, is refused here as well. It
-                    // carries no signature, so it can never verify.
                     return OwidParseStatus.UnsupportedVersion;
             }
 
@@ -119,10 +123,11 @@ namespace Owid.Client
             if (ReadExactly(
                     stream, signature, Constants.SignatureLength) == false)
             {
-                // The declared payload did not leave the signature the version
-                // requires, which is the same finding the whole buffer reader
-                // makes when the counts disagree.
-                return OwidParseStatus.ByteCountMismatch;
+                // The stream ran out before the signature. That is data
+                // stopping early rather than a declaration disagreeing with
+                // data that is all present, and a caller reading from a source
+                // still arriving needs to know whether waiting would help.
+                return OwidParseStatus.UnexpectedEnd;
             }
 
             owid = Model.Owid.CreateForParser(
@@ -215,9 +220,9 @@ namespace Owid.Client
                 var want = (int)Math.Min(collected.Length, left);
                 if (ReadExactly(stream, collected, want) == false)
                 {
-                    // The stream ended inside the payload the sender declared,
-                    // so the declaration and the data disagree.
-                    return OwidParseStatus.ByteCountMismatch;
+                    // The stream ended inside the payload the sender declared.
+                    // Data stopping early, not a disagreement.
+                    return OwidParseStatus.UnexpectedEnd;
                 }
                 result.Write(collected, 0, want);
                 left -= want;

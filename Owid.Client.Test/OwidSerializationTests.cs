@@ -186,7 +186,7 @@ namespace Owid.Client.Test
         /// OWID.
         /// </summary>
         [TestMethod]
-        public void TestEmptyOwidMarkerIsNotAnOwid()
+        public void TestEmptyOwidMarkerIsAnAbsentNode()
         {
             byte[] bytes;
             using (var stream = new MemoryStream())
@@ -207,7 +207,7 @@ namespace Owid.Client.Test
             // can never verify. Reading one from a buffer would hand a caller
             // the one thing the construction boundary exists to prevent, an
             // instance with no signature that looks like an identifier.
-            TestOwid.AssertRefused(bytes, OwidParseStatus.UnsupportedVersion);
+            TestOwid.AssertRefused(bytes, OwidParseStatus.AbsentNode);
         }
 
         private async Task TestVersionRoundtrip(OwidVersion version)

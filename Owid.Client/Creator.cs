@@ -44,7 +44,7 @@ namespace Owid.Client
         /// <param name="configuration">
         /// Configuration to use.
         /// </param>
-        /// <exception cref="ArithmeticException">
+        /// <exception cref="ArgumentException">
         /// <paramref name="configuration"/>.<see cref="OwidConfiguration.Domain"/> is empty or whitespace.
         /// </exception>
         /// <exception cref="ArgumentException">

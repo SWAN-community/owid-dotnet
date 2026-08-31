@@ -59,7 +59,7 @@
             <param name="configuration">
             Configuration to use.
             </param>
-            <exception cref="T:System.ArithmeticException">
+            <exception cref="T:System.ArgumentException">
             <paramref name="configuration"/>.<see cref="P:Owid.Client.Model.Configuration.OwidConfiguration.Domain"/> is empty or whitespace.
             </exception>
             <exception cref="T:System.ArgumentException">
@@ -346,9 +346,17 @@
         </member>
         <member name="M:Owid.Client.Extensions.FromBuffer(Owid.Client.Model.Owid,System.IO.BinaryReader)">
             <summary>
-            Reads <see cref="N:Owid"/> data
-            from <paramref name="reader"/>.
+            Reads <see cref="N:Owid"/> data from <paramref name="reader"/> into
+            an existing instance, throwing on malformed data.
             </summary>
+            <remarks>
+            Internal because it writes into an instance the caller already
+            holds, which would let external code alter an OWID whose signature
+            was computed over the original bytes, the exact thing closing
+            construction is meant to prevent. External callers read with
+            <see cref="M:Owid.Client.Model.Owid.TryRead(System.IO.Stream,Owid.Client.Model.Owid@,Owid.Client.Model.OwidParseStatus@)"/>. This remains for the tests that
+            pin the legacy throwing behaviour.
+            </remarks>
             <param name="owid"></param>
             <param name="reader"></param>
             <exception cref="T:System.Exception"></exception>
@@ -882,10 +890,10 @@
              remain and only the surface would look different.
             
              This is the exact-buffer contract: the envelope must end where the
-             buffer does. Framed reading, where an envelope is followed by more
-             data, stays with the stream reader in Extensions, which must not
-             require the end of the stream because what follows may be the next
-             envelope rather than rubbish.
+             buffer does. Framed reading, where an envelope may be followed by more
+             data, is <see cref="T:Owid.Client.OwidStreamReader"/>, which must not require the
+             end of the stream because what follows may be the next envelope
+             rather than rubbish.
              </remarks>
         </member>
         <member name="M:Owid.Client.OwidReader.TryRead(System.Byte[],Owid.Client.Model.Owid@)">

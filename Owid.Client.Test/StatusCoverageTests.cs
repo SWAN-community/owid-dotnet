@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -117,6 +118,27 @@ namespace Owid.Client.Test
                 "not base 64 at all!!", out _, out var encoded));
             Assert.AreEqual(OwidParseStatus.InvalidBase64, encoded);
             ReachedParse.Add(encoded);
+
+            // Reachable only on the framed read. The whole buffer contract
+            // refuses the declaration first, because a byte array can never
+            // hold more than the runtime's maximum array length, so a
+            // declaration above it always disagrees with the bytes present.
+            // A stream has no such ceiling on what it might deliver, so the
+            // declaration is judged on its own before anything is sized by
+            // it.
+            var head = new byte[] { (byte)OwidVersion.Version3, (byte)'a', 0 }
+                .Concat(new byte[] { 0, 0, 0, 0 })
+                .Concat(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF })
+                .ToArray();
+            using (var stream = new MemoryStream(head))
+            {
+                Assert.IsFalse(Model.Owid.TryRead(
+                    stream, out var large, out var capacity));
+                Assert.IsNull(large);
+                Assert.AreEqual(
+                    OwidParseStatus.ImplementationCapacityExceeded, capacity);
+                ReachedParse.Add(capacity);
+            }
         }
 
         [TestMethod]
@@ -175,12 +197,9 @@ namespace Owid.Client.Test
             // produces it today.
             var unreachableParse = new[]
             {
-                // The compiler already refuses anything but a string or a
-                // byte array on these surfaces.
+                // The compiler already refuses anything but a string, a
+                // byte array or a stream on these surfaces.
                 OwidParseStatus.InvalidInputType,
-                // An array index cannot exceed the declaration that the count
-                // check has already refused.
-                OwidParseStatus.ImplementationCapacityExceeded,
                 // No path while the byte count rule holds.
                 OwidParseStatus.MalformedEnvelope,
             };

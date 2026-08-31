@@ -36,10 +36,10 @@ namespace Owid.Client
     /// remain and only the surface would look different.
     ///
     /// This is the exact-buffer contract: the envelope must end where the
-    /// buffer does. Framed reading, where an envelope is followed by more
-    /// data, stays with the stream reader in Extensions, which must not
-    /// require the end of the stream because what follows may be the next
-    /// envelope rather than rubbish.
+    /// buffer does. Framed reading, where an envelope may be followed by more
+    /// data, is <see cref="OwidStreamReader"/>, which must not require the
+    /// end of the stream because what follows may be the next envelope
+    /// rather than rubbish.
     /// </remarks>
     internal static class OwidReader
     {

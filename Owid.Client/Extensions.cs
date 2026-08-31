@@ -165,13 +165,21 @@ namespace Owid.Client
 		}
 
 		/// <summary>
-		/// Reads <see cref="Owid"/> data
-		/// from <paramref name="reader"/>.
+		/// Reads <see cref="Owid"/> data from <paramref name="reader"/> into
+		/// an existing instance, throwing on malformed data.
 		/// </summary>
+		/// <remarks>
+		/// Internal because it writes into an instance the caller already
+		/// holds, which would let external code alter an OWID whose signature
+		/// was computed over the original bytes, the exact thing closing
+		/// construction is meant to prevent. External callers read with
+		/// <see cref="Model.Owid.TryRead"/>. This remains for the tests that
+		/// pin the legacy throwing behaviour.
+		/// </remarks>
 		/// <param name="owid"></param>
 		/// <param name="reader"></param>
 		/// <exception cref="Exception"></exception>
-		public static void FromBuffer(
+		internal static void FromBuffer(
 			this Model.Owid owid, 
 			BinaryReader reader)
 		{

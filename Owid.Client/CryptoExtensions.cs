@@ -135,7 +135,7 @@ namespace Owid.Client
             {
                 return OwidSignatureStatus.KeyUnavailable;
             }
-            if (owid.Signature.Length != Constants.SignatureLength)
+            if (owid.SignatureInternal.Length != Constants.SignatureLength)
             {
                 return OwidSignatureStatus.InvalidSignatureLength;
             }

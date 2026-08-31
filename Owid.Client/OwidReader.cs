@@ -218,6 +218,9 @@ namespace Owid.Client
                 {
                     return OwidParseStatus.UnexpectedEnd;
                 }
+                // Two bytes of hours reach 65,535 hours, which is June 2027,
+                // so this arithmetic cannot leave the runtime's range and
+                // there is nothing to guard.
                 var hours = (buffer[at] << 8) | buffer[at + 1];
                 at += 2;
                 date = Constants.BaseDate.AddHours(hours);
@@ -234,6 +237,17 @@ namespace Owid.Client
                 (buffer[at + 2] << 16) |
                 (buffer[at + 3] << 24));
             at += sizeof(uint);
+
+            // The wire allows 4,294,967,295 minutes, which is the year 10186,
+            // and DateTime stops at the end of 9999. A count past that is
+            // judged before the arithmetic, because AddMinutes would throw on
+            // it and this read promises not to. The same bytes read fine
+            // where the date type is wider, so this is the runtime's limit
+            // rather than a fault in the data.
+            if (minutes > Constants.MaximumMinutes)
+            {
+                return OwidParseStatus.ImplementationCapacityExceeded;
+            }
             date = Constants.BaseDate.AddMinutes(minutes);
             return OwidParseStatus.Parsed;
         }

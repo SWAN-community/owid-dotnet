@@ -10,6 +10,17 @@
             in hours or minutes after this date.
             </summary>
         </member>
+        <member name="F:Owid.Client.Constants.MaximumMinutes">
+            <summary>
+            The largest count of minutes after <see cref="F:Owid.Client.Constants.BaseDate"/> that a
+            <see cref="T:System.DateTime"/> can hold, which is 4,197,074,399 and lands
+            on 9999-12-31 23:59. The four byte count in versions 2 and 3 runs
+            to 4,294,967,295, which is 15 February 10186, so a count above
+            this is one the wire format allows and this runtime cannot
+            represent. Derived from <see cref="F:System.DateTime.MaxValue"/> rather
+            than written as a number so it cannot drift from the runtime.
+            </summary>
+        </member>
         <member name="F:Owid.Client.Constants.SignatureLength">
             <summary>
             The length of an OWID signature in bytes. 
@@ -739,6 +750,13 @@
             deliberately distinct from the data being wrong, because the same
             bytes may be readable elsewhere.
             </summary>
+            <remarks>
+            Produced by a declared payload larger than an array can hold, and
+            by a date past the end of the year 9999, where
+            <see cref="T:System.DateTime"/> stops while the four byte minute
+            count of versions 2 and 3 runs to 15 February 10186. The date is
+            judged before the arithmetic, so a read never throws on it.
+            </remarks>
         </member>
         <member name="F:Owid.Client.Model.OwidParseStatus.MalformedEnvelope">
             <summary>

@@ -159,6 +159,31 @@ namespace Owid.Client.Model
                 return false;
             }
 
+            // The standard alphabet is accepted with or without the
+            // trailing padding, because both are ordinary ways to carry an
+            // encoded OWID, and the other implementations already accept
+            // both. Whitespace does not count towards the group of four. A
+            // length that leaves one character over encodes no whole byte
+            // and cannot have come from an encoder.
+            var significant = 0;
+            foreach (var c in value)
+            {
+                if (char.IsWhiteSpace(c) == false)
+                {
+                    significant++;
+                }
+            }
+            var over = significant % 4;
+            if (over == 1)
+            {
+                status = OwidParseStatus.InvalidBase64;
+                return false;
+            }
+            if (over != 0)
+            {
+                value += new string('=', 4 - over);
+            }
+
             // Sized from the encoded length rather than guessed, and decoded
             // without throwing, so that a string which is not Base64 costs a
             // failed comparison rather than an exception. The caller does not

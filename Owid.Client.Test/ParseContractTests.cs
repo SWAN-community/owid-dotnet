@@ -231,5 +231,43 @@ namespace Owid.Client.Test
             Assert.AreEqual(owid.Payload.LongLength, owid.PayloadLength);
         }
 
+
+        /// <summary>
+        /// The standard alphabet is accepted with or without the trailing
+        /// padding, because both are ordinary ways to carry an encoded OWID
+        /// and the other implementations already accept both.
+        /// </summary>
+        [TestMethod]
+        public void UnpaddedBase64_Parses()
+        {
+            var padded = Create(new byte[] { 1, 2, 3 }).AsBase64();
+            var unpadded = padded.TrimEnd('=');
+
+            Assert.IsTrue(Model.Owid.TryParse(
+                unpadded, out var owid, out var status));
+            Assert.AreEqual(OwidParseStatus.Parsed, status);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, owid!.Payload);
+        }
+
+        /// <summary>
+        /// A length one over a group of four encodes no whole byte, so it
+        /// cannot have come from an encoder and no padding can mend it.
+        /// </summary>
+        [TestMethod]
+        public void ALengthOneOverAGroupOfFourIsNotBase64()
+        {
+            var padded = Create(new byte[] { 1, 2, 3 }).AsBase64();
+            var broken = padded.TrimEnd('=') + "A";
+            while (broken.Length % 4 != 1)
+            {
+                broken += "A";
+            }
+
+            Assert.IsFalse(Model.Owid.TryParse(
+                broken, out var owid, out var status));
+            Assert.IsNull(owid);
+            Assert.AreEqual(OwidParseStatus.InvalidBase64, status);
+        }
+
     }
 }

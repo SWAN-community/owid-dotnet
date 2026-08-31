@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -77,7 +77,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public void DeclaredLengthMatches_Parses()
         {
-            var owid = new Model.Owid(Envelope((uint)Payload.Length, Payload, Signature));
+            var owid = TestOwid.Parse(Envelope((uint)Payload.Length, Payload, Signature));
             CollectionAssert.AreEqual(Payload, owid.Payload);
             CollectionAssert.AreEqual(Signature, owid.Signature);
             Assert.AreEqual("51d.es", owid.Domain);
@@ -92,7 +92,7 @@ namespace Owid.Client.Test
         public void MatchingOneMebibytePayload_Parses()
         {
             var payload = Filled(1024 * 1024, 0x5A);
-            var owid = new Model.Owid(
+            var owid = TestOwid.Parse(
                 Envelope((uint)payload.Length, payload, Signature));
 
             CollectionAssert.AreEqual(payload, owid.Payload);
@@ -108,10 +108,10 @@ namespace Owid.Client.Test
             var original = new Model.Owid
             {
                 Domain = "51d.es",
-                Payload = Payload,
-                Signature = Signature,
+                PayloadInternal = Payload,
+                SignatureInternal = Signature,
             };
-            var parsed = new Model.Owid(original.AsByteArray());
+            var parsed = TestOwid.Parse(original.AsByteArray());
             CollectionAssert.AreEqual(Payload, parsed.Payload);
         }
 
@@ -126,8 +126,10 @@ namespace Owid.Client.Test
             foreach (var declared in new[] { Payload.Length - 1, Payload.Length + 1 })
             {
                 var bytes = Envelope((uint)declared, Payload, Signature);
-                Assert.ThrowsExactly<Exception>(
-                    () => new Model.Owid(bytes), $"declared {declared}");
+                TestOwid.AssertRefused(
+                    bytes,
+                    OwidParseStatus.ByteCountMismatch,
+                    $"declared {declared}");
             }
         }
 
@@ -141,7 +143,7 @@ namespace Owid.Client.Test
             var bytes = Envelope((uint)Payload.Length, Payload, Signature);
             var longer = new byte[bytes.Length + 1];
             Array.Copy(bytes, longer, bytes.Length);
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(longer));
+            TestOwid.AssertRefused(longer, OwidParseStatus.ByteCountMismatch);
         }
 
         /// <summary>
@@ -154,7 +156,7 @@ namespace Owid.Client.Test
         {
             var bytes = Envelope(
                 (uint)Payload.Length, Payload, Filled(SignatureLength - 1, 0x99));
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(bytes));
+            TestOwid.AssertRefused(bytes, OwidParseStatus.ByteCountMismatch);
         }
 
         /// <summary>
@@ -178,8 +180,10 @@ namespace Owid.Client.Test
             {
                 var bytes = Envelope(declared, Array.Empty<byte>(), Array.Empty<byte>());
                 var before = GC.GetAllocatedBytesForCurrentThread();
-                Assert.ThrowsExactly<Exception>(
-                    () => new Model.Owid(bytes), $"declared {declared}");
+                TestOwid.AssertRefused(
+                    bytes,
+                    OwidParseStatus.ByteCountMismatch,
+                    $"declared {declared}");
                 var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
                 Assert.IsTrue(
                     allocated < 64 * 1024,
@@ -287,7 +291,12 @@ namespace Owid.Client.Test
         /// A read-only stream that reports it cannot seek, so the parser has
         /// to take the bounded path.
         /// </summary>
-        private sealed class ForwardOnlyStream : Stream
+        /// <remarks>
+        /// Internal rather than private because the framed reading tests need
+        /// the same source: a stream that cannot say how much is left is the
+        /// case that reader exists for.
+        /// </remarks>
+        internal sealed class ForwardOnlyStream : Stream
         {
             private readonly MemoryStream _inner;
 
@@ -321,5 +330,6 @@ namespace Owid.Client.Test
                 base.Dispose(disposing);
             }
         }
+
     }
 }

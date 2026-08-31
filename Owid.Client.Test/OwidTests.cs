@@ -15,6 +15,7 @@
  * ***************************************************************************/
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Owid.Client.Model;
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -81,7 +82,7 @@ namespace Owid.Client.Test
             var owidString = original.AsBase64();
 
             // Create a new OWID from the base 64 string.
-            var copy = new Model.Owid(owidString);
+            var copy = TestOwid.Parse(owidString);
 
             // Verify the copy OWID with the public key.
             using (var crypto = ECDsa.Create())
@@ -97,10 +98,12 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestVerificationFailsWithInvalidSignature()
         {
-            var owid = CreateOwid();
-            
-            // Tamper with the signature
-            owid.Signature[0] = (byte)(owid.Signature[0] ^ 0xFF);
+            // Tampering happens to the bytes in transit, not to an object
+            // already in memory, and it can no longer be done in memory
+            // because the payload and signature are handed out as copies. So
+            // the envelope is serialised, a signature byte is flipped, and the
+            // result is read back the way a receiver would read it.
+            var owid = Tampered(CreateOwid(), signature: true);
 
             // Verification should fail with corrupted signature
             using (var crypto = ECDsa.Create())
@@ -137,7 +140,7 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
                 owid.Date = DateTime.UtcNow;
-                owid.Payload = Array.Empty<byte>();
+                owid.PayloadInternal = Array.Empty<byte>();
                 creator.Sign(owid);
             }
 
@@ -166,7 +169,7 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
                 owid.Date = DateTime.UtcNow;
-                owid.Payload = largePayload;
+                owid.PayloadInternal = largePayload;
                 creator.Sign(owid);
             }
 
@@ -188,7 +191,7 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
                 
-                var owid = creator.Sign(TestText);
+                var owid = creator.Create(TestText);
                 Assert.AreEqual(TestText, owid.PayloadAsString);
 
                 using (var verifyKey = ECDsa.Create())
@@ -212,7 +215,7 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
                 
-                var owid = creator.Sign(payload);
+                var owid = creator.Create(payload);
                 CollectionAssert.AreEqual(payload, owid.Payload);
 
                 using (var verifyKey = ECDsa.Create())
@@ -235,7 +238,7 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid);
             }
 
@@ -252,9 +255,9 @@ namespace Owid.Client.Test
 
             // Multiple encode/decode cycles
             var encoded1 = original.AsBase64();
-            var decoded1 = new Model.Owid(encoded1);
+            var decoded1 = TestOwid.Parse(encoded1);
             var encoded2 = decoded1.AsBase64();
-            var decoded2 = new Model.Owid(encoded2);
+            var decoded2 = TestOwid.Parse(encoded2);
 
             // All should verify successfully
             using (var crypto = ECDsa.Create())
@@ -270,10 +273,13 @@ namespace Owid.Client.Test
         /// Test that invalid Base64 throws on deserialization.
         /// </summary>
         [TestMethod]
-        public void TestInvalidBase64Throws()
+        public void TestInvalidBase64IsRefused()
         {
             var invalidBase64 = "This is not valid Base64!@#$";
-            Assert.ThrowsExactly<FormatException>(() => new Model.Owid(invalidBase64));
+            Assert.IsFalse(Model.Owid.TryParse(
+                invalidBase64, out var owid, out var status));
+            Assert.IsNull(owid);
+            Assert.AreEqual(OwidParseStatus.InvalidBase64, status);
         }
 
         /// <summary>
@@ -293,7 +299,7 @@ namespace Owid.Client.Test
                 for (int i = 0; i < batchSize; i++)
                 {
                     var payload = Encoding.ASCII.GetBytes($"Payload {i}");
-                    owids[i] = creator.Sign(payload);
+                    owids[i] = creator.Create(payload);
                 }
             }
 
@@ -342,8 +348,8 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PublicPEM);
                 Assert.IsTrue(owid.Verify(crypto));
 
-                owid.Signature[0] = (byte)(owid.Signature[0] ^ 0xFF);
-                Assert.IsFalse(owid.Verify(crypto));
+                var tampered = Tampered(owid, signature: true);
+                Assert.IsFalse(tampered.Verify(crypto));
             }
         }
 
@@ -357,12 +363,15 @@ namespace Owid.Client.Test
             var owid = CreateOwid();
             Assert.AreEqual(owid.GetByteCount(), owid.AsByteArray().Length);
 
-            // And with an empty payload.
-            var empty = new Model.Owid();
+            // And with an empty payload. Created rather than assembled,
+            // because a caller can no longer make an OWID and hand it to be
+            // signed; the creator makes the whole thing or nothing.
+            Model.Owid empty;
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(PrivatePEM);
-                new Creator(TestDomain, crypto).Sign(empty);
+                empty = new Creator(TestDomain, crypto)
+                    .Create(Array.Empty<byte>());
             }
             Assert.AreEqual(empty.GetByteCount(), empty.AsByteArray().Length);
         }
@@ -406,7 +415,7 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid, others);
             }
 
@@ -430,7 +439,7 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid, others);
             }
 
@@ -455,7 +464,7 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid, others);
             }
 
@@ -472,16 +481,35 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestModifiedPayloadFailsVerification()
         {
-            var owid = CreateOwid();
-
-            // Tamper with the payload after signing.
-            owid.Payload[0] = (byte)(owid.Payload[0] ^ 0xFF);
+            // As above, the tampering is done to the serialised bytes.
+            var owid = Tampered(CreateOwid(), signature: false);
 
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(PublicPEM);
                 Assert.IsFalse(await owid.VerifyAsync(crypto));
             }
+        }
+
+        /// <summary>
+        /// The same OWID with one byte flipped, read back from its serialised
+        /// form so that the result is what a receiver would actually be given.
+        /// </summary>
+        /// <param name="signature">
+        /// True to flip a byte of the signature, false to flip the first byte
+        /// of the payload.
+        /// </param>
+        private static Model.Owid Tampered(Model.Owid owid, bool signature)
+        {
+            var bytes = owid.AsByteArray();
+            var at = signature
+                ? bytes.Length - Constants.SignatureLength
+                : bytes.Length - Constants.SignatureLength - owid.Payload.Length;
+            bytes[at] = (byte)(bytes[at] ^ 0xFF);
+            Assert.IsTrue(
+                Model.Owid.TryParse(bytes, out var result, out var status),
+                $"flipping a byte should leave a readable envelope, got {status}");
+            return result!;
         }
 
         /// <summary>
@@ -493,7 +521,7 @@ namespace Owid.Client.Test
         {
             var original = CreateOwid();
             var bytes = original.AsByteArray();
-            var copy = new Model.Owid(bytes);
+            var copy = TestOwid.Parse(bytes);
 
             Assert.AreEqual(original.Version, copy.Version);
             Assert.AreEqual(original.Domain, copy.Domain);
@@ -520,7 +548,7 @@ namespace Owid.Client.Test
         /// header results in an end of stream exception when reading.
         /// </summary>
         [TestMethod]
-        public void TestTruncatedBase64Throws()
+        public void TestTruncatedBase64IsRefused()
         {
             var base64 = CreateOwid().AsBase64();
 
@@ -528,13 +556,20 @@ namespace Owid.Client.Test
             // characters so the Base64 itself remains decodable. The missing
             // bytes are detected when the signature is read.
             var half = base64.Substring(0, base64.Length / 2 / 4 * 4);
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(half));
+            Assert.IsFalse(Model.Owid.TryParse(
+                half, out var truncated, out var truncatedStatus));
+            Assert.IsNull(truncated);
+            Assert.AreNotEqual(OwidParseStatus.Parsed, truncatedStatus);
 
-            // Truncate to just the first eight characters which cuts the
-            // buffer inside the domain producing an end of stream exception.
+            // Truncate to the first eight characters, which cuts the buffer
+            // inside the domain. The data simply stops, which is a different
+            // finding from a declaration that disagrees with data that is all
+            // present, and is reported as such.
             var head = base64.Substring(0, 8);
-            Assert.ThrowsExactly<EndOfStreamException>(
-                () => new Model.Owid(head));
+            Assert.IsFalse(Model.Owid.TryParse(
+                head, out var cut, out var cutStatus));
+            Assert.IsNull(cut);
+            Assert.AreEqual(OwidParseStatus.UnexpectedEnd, cutStatus);
         }
 
         /// <summary>
@@ -556,7 +591,7 @@ namespace Owid.Client.Test
                     var verified = false;
                     try
                     {
-                        var owid = new Model.Owid(corrupt);
+                        var owid = TestOwid.Parse(corrupt);
                         verified = await owid.VerifyAsync(crypto);
                     }
                     catch (Exception)
@@ -589,11 +624,11 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.UTF8.GetBytes(text);
+                owid.PayloadInternal = Encoding.UTF8.GetBytes(text);
                 creator.Sign(owid);
             }
 
-            var copy = new Model.Owid(owid.AsBase64());
+            var copy = TestOwid.Parse(owid.AsBase64());
 
             // The payload bytes are preserved exactly.
             CollectionAssert.AreEqual(owid.Payload, copy.Payload);
@@ -700,7 +735,7 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
                 owid.Date = DateTime.UtcNow;
-                owid.Payload = ASCIIEncoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = ASCIIEncoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid);
             }
             return owid;
@@ -715,7 +750,7 @@ namespace Owid.Client.Test
                 var creator = new Creator(TestDomain, crypto);
                 for (var i = 0; i < count; i++)
                 {
-                    others[i] = creator.Sign($"Other {Guid.NewGuid()}");
+                    others[i] = creator.Create($"Other {Guid.NewGuid()}");
                 }
             }
             return others;

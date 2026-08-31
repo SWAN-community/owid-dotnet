@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -70,7 +70,7 @@ namespace Owid.Client.Test
         public void TestDatePrecisionVersion3()
         {
             var owid = CreateOwid(OwidVersion.Version3);
-            var copy = new Model.Owid(owid.AsByteArray());
+            var copy = TestOwid.Parse(owid.AsByteArray());
             Assert.AreEqual(OwidTests.FloorToMinute(owid.Date), copy.Date);
             Assert.AreEqual(0, copy.Date.Second);
         }
@@ -83,7 +83,7 @@ namespace Owid.Client.Test
         public void TestDatePrecisionVersion2()
         {
             var owid = CreateOwid(OwidVersion.Version2);
-            var copy = new Model.Owid(owid.AsByteArray());
+            var copy = TestOwid.Parse(owid.AsByteArray());
             Assert.AreEqual(OwidTests.FloorToMinute(owid.Date), copy.Date);
             Assert.AreEqual(0, copy.Date.Second);
         }
@@ -98,7 +98,7 @@ namespace Owid.Client.Test
         public void TestDatePrecisionVersion1()
         {
             var owid = CreateOwid(OwidVersion.Version1);
-            var copy = new Model.Owid(owid.AsByteArray());
+            var copy = TestOwid.Parse(owid.AsByteArray());
             var expected = BaseDate.AddHours(
                 (ushort)(owid.Date - BaseDate).TotalHours);
             Assert.AreEqual(expected, copy.Date);
@@ -116,7 +116,7 @@ namespace Owid.Client.Test
         {
             var date = new DateTime(2021, 2, 3, 4, 0, 0, DateTimeKind.Utc);
             var hours = (ushort)(date - BaseDate).TotalHours;
-            var owid = new Model.Owid(BuildBuffer(
+            var owid = TestOwid.Parse(BuildBuffer(
                 OwidVersion.Version1,
                 writer =>
                 {
@@ -137,7 +137,7 @@ namespace Owid.Client.Test
         {
             var date = new DateTime(2021, 2, 3, 4, 5, 0, DateTimeKind.Utc);
             var minutes = (uint)(date - BaseDate).TotalMinutes;
-            var owid = new Model.Owid(BuildBuffer(
+            var owid = TestOwid.Parse(BuildBuffer(
                 OwidVersion.Version2,
                 writer => writer.Write(minutes)));
             Assert.AreEqual(OwidVersion.Version2, owid.Version);
@@ -169,20 +169,24 @@ namespace Owid.Client.Test
         /// when parsing.
         /// </summary>
         [TestMethod]
-        public void TestUnsupportedVersionThrows()
+        public void TestUnsupportedVersionIsRefused()
         {
             var bytes = CreateOwid(OwidVersion.Version3).AsByteArray();
             bytes[0] = 9;
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(bytes));
+            Assert.IsFalse(
+                Model.Owid.TryParse(bytes, out var owid, out var status));
+            Assert.IsNull(owid);
+            Assert.AreEqual(OwidParseStatus.UnsupportedVersion, status);
         }
 
         /// <summary>
         /// Test that an empty OWID marker written with
-        /// <see cref="Extensions.EmptyToBuffer(BinaryWriter)"/> reads back as
-        /// an empty OWID with default field values.
+        /// <see cref="Extensions.EmptyToBuffer(BinaryWriter)"/> writes a
+        /// single zero byte, and that byte is refused when read as a whole
+        /// OWID.
         /// </summary>
         [TestMethod]
-        public void TestEmptyOwidMarkerRoundtrip()
+        public void TestEmptyOwidMarkerIsAnAbsentNode()
         {
             byte[] bytes;
             using (var stream = new MemoryStream())
@@ -198,17 +202,18 @@ namespace Owid.Client.Test
             Assert.AreEqual(1, bytes.Length);
             Assert.AreEqual(0, bytes[0]);
 
-            var owid = new Model.Owid(bytes);
-            Assert.AreEqual(OwidVersion.Empty, owid.Version);
-            Assert.AreEqual(string.Empty, owid.Domain);
-            Assert.AreEqual(0, owid.Payload.Length);
-            Assert.AreEqual(0, owid.Signature.Length);
+            // The marker stands for an absent node inside a stream. It is not
+            // an OWID: it carries no domain, date, payload or signature, so it
+            // can never verify. Reading one from a buffer would hand a caller
+            // the one thing the construction boundary exists to prevent, an
+            // instance with no signature that looks like an identifier.
+            TestOwid.AssertRefused(bytes, OwidParseStatus.AbsentNode);
         }
 
         private async Task TestVersionRoundtrip(OwidVersion version)
         {
             var owid = CreateOwid(version);
-            var copy = new Model.Owid(owid.AsByteArray());
+            var copy = TestOwid.Parse(owid.AsByteArray());
 
             Assert.AreEqual(version, copy.Version);
             Assert.AreEqual(owid.Domain, copy.Domain);
@@ -230,7 +235,7 @@ namespace Owid.Client.Test
             {
                 crypto.ImportFromPem(PrivatePEM);
                 var creator = new Creator(TestDomain, crypto);
-                owid.Payload = Encoding.ASCII.GetBytes(TestText);
+                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
                 creator.Sign(owid);
             }
             return owid;

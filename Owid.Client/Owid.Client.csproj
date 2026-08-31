@@ -32,4 +32,12 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The tests build deliberately malformed and partly assembled
+         envelopes as fixtures, which is exactly what callers may no
+         longer do, so they need the internal construction the
+         boundary keeps from everyone else. -->
+    <InternalsVisibleTo Include="Owid.Client.Test" />
+  </ItemGroup>
+
 </Project>

@@ -107,7 +107,7 @@ namespace Owid.Client.Test
         public void DomainOfMaximumLength_Parses()
         {
             var domain = DomainOfLength(253);
-            var owid = new Model.Owid(Envelope(domain));
+            var owid = TestOwid.Parse(Envelope(domain));
             Assert.AreEqual(domain, owid.Domain);
             Assert.AreEqual(253, owid.Domain.Length);
             CollectionAssert.AreEqual(Payload, owid.Payload);
@@ -122,7 +122,7 @@ namespace Owid.Client.Test
         public void DomainOverMaximumLength_IsRefused()
         {
             var bytes = Envelope(DomainOfLength(254));
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(bytes));
+            TestOwid.AssertRefused(bytes, OwidParseStatus.InvalidDomainEncoding);
         }
 
         /// <summary>
@@ -141,7 +141,7 @@ namespace Owid.Client.Test
             bytes[0] = (byte)OwidVersion.Version3;
             for (var i = 1; i < bytes.Length; i++) { bytes[i] = (byte)'a'; }
             var before = GC.GetAllocatedBytesForCurrentThread();
-            Assert.ThrowsExactly<Exception>(() => new Model.Owid(bytes));
+            TestOwid.AssertRefused(bytes, OwidParseStatus.InvalidDomainEncoding);
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.IsTrue(
                 allocated < 64 * 1024, $"allocated {allocated} bytes");
@@ -160,10 +160,10 @@ namespace Owid.Client.Test
                 var original = new Model.Owid
                 {
                     Domain = domain,
-                    Payload = Payload,
-                    Signature = Signature,
+                    PayloadInternal = Payload,
+                    SignatureInternal = Signature,
                 };
-                var parsed = new Model.Owid(original.AsByteArray());
+                var parsed = TestOwid.Parse(original.AsByteArray());
                 Assert.AreEqual(domain, parsed.Domain);
                 CollectionAssert.AreEqual(Payload, parsed.Payload);
                 CollectionAssert.AreEqual(Signature, parsed.Signature);
@@ -182,9 +182,9 @@ namespace Owid.Client.Test
             using (var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256))
             {
                 var creator = new Creator(domain, crypto);
-                var owid = creator.Sign(Payload);
+                var owid = creator.Create(Payload);
                 Assert.AreEqual(domain, owid.Domain);
-                var parsed = new Model.Owid(owid.AsByteArray());
+                var parsed = TestOwid.Parse(owid.AsByteArray());
                 Assert.AreEqual(domain, parsed.Domain);
                 Assert.AreEqual(253, parsed.Domain.Length);
                 CollectionAssert.AreEqual(Payload, parsed.Payload);
@@ -239,8 +239,8 @@ namespace Owid.Client.Test
             var owid = new Model.Owid()
             {
                 Domain = DomainOfLength(254),
-                Payload = Payload,
-                Signature = Signature,
+                PayloadInternal = Payload,
+                SignatureInternal = Signature,
             };
             var refused = Assert.ThrowsExactly<Exception>(
                 () => owid.AsByteArray());
@@ -264,12 +264,12 @@ namespace Owid.Client.Test
             var other = new Model.Owid()
             {
                 Domain = DomainOfLength(254),
-                Payload = Payload,
-                Signature = Signature,
+                PayloadInternal = Payload,
+                SignatureInternal = Signature,
             };
             var refused = Assert.ThrowsExactly<Exception>(
                 () => creator.Sign(
-                    new Model.Owid() { Payload = Payload },
+                    new Model.Owid() { PayloadInternal = Payload },
                     other));
             StringAssert.Contains(refused.Message, "253");
         }

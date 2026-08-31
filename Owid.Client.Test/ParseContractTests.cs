@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -213,5 +213,23 @@ namespace Owid.Client.Test
                     "and the signature is then found not to match");
             }
         }
+
+        /// <summary>
+        /// The payload size can be read without copying the payload, so an
+        /// application applying a size limit does not pay for a copy of the
+        /// bytes it is about to reject.
+        /// </summary>
+        [TestMethod]
+        public void PayloadLength_DoesNotCopy()
+        {
+            var owid = Create(new byte[] { 1, 2, 3, 4 });
+            Assert.AreEqual(4L, owid.PayloadLength);
+
+            // Reading it does not hand out the array, so nothing a caller
+            // holds can be written into.
+            Assert.AreNotSame(owid.Payload, owid.Payload);
+            Assert.AreEqual(owid.Payload.LongLength, owid.PayloadLength);
+        }
+
     }
 }

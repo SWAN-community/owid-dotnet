@@ -48,11 +48,12 @@ limits suitable for their use case and enforce them before buffering the
 binary form or decoding Base64. An implementation capacity failure or an
 application policy rejection is distinct from an invalid OWID.
 
-For transport input, limit the complete HTTP body or encoded envelope; allow
-for the domain and other OWID fields as well as the payload. After parsing,
-`owid.Payload.LongLength` reports the actual payload size without another
-copy and can be used for downstream policy. The parser cannot choose either
-limit on behalf of the application.
+For transport input, limit the complete HTTP body or encoded envelope, and
+allow for the domain and the other OWID fields as well as the payload. After
+parsing, `owid.PayloadLength` reports the actual payload size for downstream
+policy without copying the payload to answer the question, whereas
+`owid.Payload` hands out a copy every time it is read. The parser cannot
+choose either limit on behalf of the application.
 
 ## Installation
 
@@ -77,8 +78,9 @@ var configuration = new OwidConfiguration
 };
 var creator = new Creator(configuration);
 
-// Sign a payload to produce a new OWID.
-var owid = creator.Sign("example payload");
+// Create and sign a new OWID over a payload. Creating and signing are the
+// same step, because an OWID cannot exist in an unsigned state.
+var owid = creator.Create("example payload");
 
 // Serialize to a Base64 string for transmission or storage.
 var base64 = owid.AsBase64();
@@ -89,20 +91,118 @@ var base64 = owid.AsBase64();
 ```csharp
 using System.Security.Cryptography;
 using Owid.Client;
+using Owid.Client.Model;
 
-// Parse the OWID from its Base64 form.
-var owid = new Owid.Client.Model.Owid(base64);
+// Read the OWID from its Base64 form. Data arriving from outside is expected
+// to be malformed sometimes, so this reports why rather than throwing.
+if (Owid.Client.Model.Owid.TryParse(
+        base64, out var owid, out var status) == false)
+{
+    // owid is null and status says which of the expected problems it was.
+    return;
+}
 
-// Verify with a known public key.
+// Ask whether the signature is genuine, keeping "does not match" apart from
+// "could not check".
+var signature = owid!.SignatureStatus(publicPem);
+if (signature == OwidSignatureStatus.SignatureValid)
+{
+    // Trust the identifier.
+}
+else if (signature == OwidSignatureStatus.SignatureInvalid)
+{
+    // The only answer that means the identifier should be distrusted.
+}
+else
+{
+    // The question could not be answered, so nothing has been proved either
+    // way. Rejecting here would turn a key outage into a wave of forgeries.
+}
+
+// The boolean surfaces remain for callers that only need yes or no.
 using (var crypto = ECDsa.Create())
 {
     crypto.ImportFromPem(publicPem);
-    var valid = await owid.VerifyAsync(crypto);
+    var valid = await owid!.VerifyAsync(crypto);
 }
 
 // Or verify by fetching the public key from the creator's domain.
-var validFromDomain = await owid.VerifyAsync();
+var validFromDomain = await owid!.VerifyAsync();
 ```
+
+### Read an OWID, and what a failure means
+
+Three surfaces read an OWID, and none of them throws for bad data, because an
+OWID is read from whatever a caller was given, which on a public endpoint
+means anything at all.
+
+```csharp
+Owid.Client.Model.Owid.TryParse(base64, out var a, out var first);
+Owid.Client.Model.Owid.TryParse(bytes, out var b, out var second);
+Owid.Client.Model.Owid.TryRead(stream, out var c, out var third);
+```
+
+`TryParse` reads a whole buffer, where the envelope is all there is, so the
+declared payload must leave exactly the signature and nothing else, and any
+trailing byte is a `ByteCountMismatch`.
+
+`TryRead` reads one envelope from a stream that may carry more after it, which
+is what a tree of identifiers written one after another needs. What follows is
+not the parse's to judge, so it needs the declared payload and the signature to
+be present and says nothing about the rest. Because it can say nothing about a
+disagreement, a stream stopping short is an `UnexpectedEnd`, which is what a
+caller reading from a source still arriving needs to know. It reads forward
+only, never asks the stream for its length, and collects the payload in fixed
+pieces, so a declared count cannot decide an allocation before the bytes that
+justify it have arrived.
+
+`OwidParseStatus` says why a read failed.
+
+| Status | Meaning |
+|--------|---------|
+| `Parsed` | Structurally valid. Says nothing about the signature. |
+| `MissingInput` | Nothing was supplied, or a stream had nothing left. |
+| `InvalidInputType` | The input arrived in a form the surface cannot read. |
+| `InvalidBase64` | The string is not valid Base64, so there are no bytes. |
+| `UnsupportedVersion` | The first byte names a version this library does not know. |
+| `UnexpectedEnd` | The data stopped in the middle of a field. |
+| `InvalidDomainEncoding` | The domain is not terminated, or is too long. |
+| `ByteCountMismatch` | The declared payload count disagrees with the bytes present. |
+| `ImplementationCapacityExceeded` | Valid, but larger than this runtime can hold. |
+| `MalformedEnvelope` | Malformed in a way none of the above describes. |
+| `AbsentNode` | The version 0 marker, which stands for an absent node. |
+
+Version 0 is the marker written into a stream to stand for an absent node in a
+tree. It carries no domain, date, payload or signature, so no value is handed
+back and it can never verify. `TryRead` takes its one byte and reports
+`AbsentNode`, so a caller walking a run of frames can tell a gap from rubbish
+and reach whatever follows the gap.
+
+```csharp
+while (Owid.Client.Model.Owid.TryRead(stream, out var next, out var s)
+    || s == OwidParseStatus.AbsentNode)
+{
+    // next is the envelope, or null where the tree had no node here.
+}
+```
+
+`OwidSignatureStatus` keeps "does not match" apart from "could not check". A
+key that cannot be fetched, cannot be decoded, or is of the wrong type leaves
+the signature unjudged, and treating that as invalid would report an outage as
+an attack. On 30 August 2026 the key end points served PEM that a strict parser
+rejects, and every offline check against them failed while the keys and the
+identifiers were all fine.
+
+### An OWID cannot exist unsigned
+
+There is no public constructor. An instance reaches a caller from a successful
+read or from a `Creator` that signs it into existence, never half made, because
+an unsigned OWID is indistinguishable from a signed one to the code downstream
+of it and the difference only surfaces later, somewhere that is not looking.
+`Version`, `Domain`, `Date`, `Payload` and `Signature` are read only, and
+`Payload` and `Signature` are handed out as copies so writing into what a
+caller was given cannot alter an OWID whose signature covers the original
+bytes.
 
 ### Chained sign and verify with others
 
@@ -110,14 +210,11 @@ An OWID can be signed over other OWIDs. Verification then requires the same
 other OWIDs to be supplied in the same order.
 
 ```csharp
-var first = creator.Sign("first");
-var second = creator.Sign("second");
+var first = creator.Create("first");
+var second = creator.Create("second");
 
-// Sign a new OWID over the two others.
-var chained = creator.Sign(
-    new Owid.Client.Model.Owid { Payload = payload },
-    first,
-    second);
+// Create and sign a new OWID over the two others.
+var chained = creator.Create(payload, first, second);
 
 // Verification succeeds only with the same others.
 using (var crypto = ECDsa.Create())

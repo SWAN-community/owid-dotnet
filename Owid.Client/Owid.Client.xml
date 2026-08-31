@@ -535,6 +535,16 @@
             OWID whose signature was computed over the original bytes.
             </remarks>
         </member>
+        <member name="P:Owid.Client.Model.Owid.PayloadLength">
+            <summary>
+            How many bytes the payload holds, without copying it.
+            </summary>
+            <remarks>
+            <see cref="P:Owid.Client.Model.Owid.Payload"/> hands out a copy, so an application applying
+            a size limit to a large payload would pay for the copy it is about
+            to reject. This answers the size question on its own.
+            </remarks>
+        </member>
         <member name="P:Owid.Client.Model.Owid.PayloadAsString">
             <summary>
             The payload as a string.

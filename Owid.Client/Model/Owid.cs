@@ -66,6 +66,16 @@ namespace Owid.Client.Model
         public byte[] Payload => (byte[])PayloadInternal.Clone();
 
         /// <summary>
+        /// How many bytes the payload holds, without copying it.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Payload"/> hands out a copy, so an application applying
+        /// a size limit to a large payload would pay for the copy it is about
+        /// to reject. This answers the size question on its own.
+        /// </remarks>
+        public long PayloadLength => PayloadInternal.LongLength;
+
+        /// <summary>
         /// The payload as a string.
         /// </summary>
         public string PayloadAsString =>

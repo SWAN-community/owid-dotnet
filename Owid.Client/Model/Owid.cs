@@ -15,6 +15,7 @@
  * ***************************************************************************/
 
 using System;
+using System.IO;
 using System.Text;
 
 namespace Owid.Client.Model
@@ -203,6 +204,49 @@ namespace Owid.Client.Model
             }
 
             status = OwidReader.TryRead(buffer, out owid);
+            if (status != OwidParseStatus.Parsed)
+            {
+                owid = null;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Reads one OWID from a stream that may carry more after it.
+        /// </summary>
+        /// <param name="stream">
+        /// The source, read forward only. Its length is never asked for, so a
+        /// stream that cannot answer that still works.
+        /// </param>
+        /// <param name="owid">
+        /// The OWID when this returns true, otherwise null.
+        /// </param>
+        /// <param name="status">
+        /// <see cref="OwidParseStatus.Parsed"/> when this returns true,
+        /// otherwise why the bytes are not an OWID.
+        /// <see cref="OwidParseStatus.MissingInput"/> means the stream had
+        /// nothing left, which is how a caller reading a sequence finds out it
+        /// has reached the end.
+        /// </param>
+        /// <returns>
+        /// True when one complete OWID was read. Bytes after it are left where
+        /// they are, because in a stream they may be the next envelope rather
+        /// than rubbish, which is the one way this differs from
+        /// <see cref="TryParse(byte[], out Owid, out OwidParseStatus)"/>.
+        /// </returns>
+        /// <remarks>
+        /// Nothing is consumed when an envelope is refused beyond what had
+        /// already been read to discover the fault, so a caller that hits a
+        /// bad envelope should stop rather than expect the position to be
+        /// usable.
+        /// </remarks>
+        public static bool TryRead(
+            Stream? stream,
+            out Owid? owid,
+            out OwidParseStatus status)
+        {
+            status = OwidStreamReader.TryRead(stream!, out owid);
             if (status != OwidParseStatus.Parsed)
             {
                 owid = null;

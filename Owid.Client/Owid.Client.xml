@@ -615,6 +615,37 @@
             True when the bytes are a complete, structurally valid OWID.
             </returns>
         </member>
+        <member name="M:Owid.Client.Model.Owid.TryRead(System.IO.Stream,Owid.Client.Model.Owid@,Owid.Client.Model.OwidParseStatus@)">
+            <summary>
+            Reads one OWID from a stream that may carry more after it.
+            </summary>
+            <param name="stream">
+            The source, read forward only. Its length is never asked for, so a
+            stream that cannot answer that still works.
+            </param>
+            <param name="owid">
+            The OWID when this returns true, otherwise null.
+            </param>
+            <param name="status">
+            <see cref="F:Owid.Client.Model.OwidParseStatus.Parsed"/> when this returns true,
+            otherwise why the bytes are not an OWID.
+            <see cref="F:Owid.Client.Model.OwidParseStatus.MissingInput"/> means the stream had
+            nothing left, which is how a caller reading a sequence finds out it
+            has reached the end.
+            </param>
+            <returns>
+            True when one complete OWID was read. Bytes after it are left where
+            they are, because in a stream they may be the next envelope rather
+            than rubbish, which is the one way this differs from
+            <see cref="M:Owid.Client.Model.Owid.TryParse(System.Byte[],Owid.Client.Model.Owid@,Owid.Client.Model.OwidParseStatus@)"/>.
+            </returns>
+            <remarks>
+            Nothing is consumed when an envelope is refused beyond what had
+            already been read to discover the fault, so a caller that hits a
+            bad envelope should stop rather than expect the position to be
+            usable.
+            </remarks>
+        </member>
         <member name="M:Owid.Client.Model.Owid.ToString">
             <inheritdoc/>
         </member>
@@ -851,6 +882,55 @@
         <member name="M:Owid.Client.OwidReader.ReadDate(System.Byte[],System.Int32@,Owid.Client.Model.OwidVersion,System.DateTime@)">
             <summary>
             The creation date, whose width depends on the version.
+            </summary>
+        </member>
+        <member name="T:Owid.Client.OwidStreamReader">
+             <summary>
+             Reads one OWID from a stream that may carry more after it.
+             </summary>
+             <remarks>
+             This is the framed contract, and it differs from reading a whole buffer
+             in exactly one place. A whole buffer knows where the envelope ends, so
+             the declared payload must leave exactly the signature and nothing else.
+             A stream does not: what follows may be the next envelope rather than
+             rubbish, so this needs the declared payload and the signature to be
+             present and says nothing at all about the rest.
+            
+             It reads forward only and never asks the stream for its length, so it
+             works on a source that cannot answer that, and it reads the payload in
+             fixed pieces rather than allocating from the declared count. A sender
+             choosing that count must not be able to choose how much memory a reader
+             takes before it has seen the bytes to justify it.
+            
+             Every read goes through the stream's own end of data signal rather than
+             the helpers that throw at the end, because a stream ending early is an
+             ordinary outcome here and not a fault.
+             </remarks>
+        </member>
+        <member name="F:Owid.Client.OwidStreamReader.PieceLength">
+            <summary>
+            Bytes read at a time when collecting a payload, so that a declared
+            count cannot decide the allocation before the data is there.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.OwidStreamReader.ReadDomain(System.IO.Stream,System.String@)">
+            <summary>
+            The creator domain, terminated by a zero byte and no longer than
+            the published maximum.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.OwidStreamReader.ReadCounted(System.IO.Stream,System.UInt32,System.Byte[]@)">
+            <summary>
+            The payload, collected in fixed pieces so that nothing is sized by
+            the declared count before the bytes to justify it have arrived.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.OwidStreamReader.ReadExactly(System.IO.Stream,System.Byte[],System.Int32)">
+            <summary>
+            Fills the first <paramref name="count"/> bytes of the buffer, or
+            reports that the stream ended first. A stream may hand back fewer
+            bytes than asked for without being at its end, so this loops rather
+            than treating a short read as the end.
             </summary>
         </member>
     </members>

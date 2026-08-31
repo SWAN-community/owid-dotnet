@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -291,7 +291,12 @@ namespace Owid.Client.Test
         /// A read-only stream that reports it cannot seek, so the parser has
         /// to take the bounded path.
         /// </summary>
-        private sealed class ForwardOnlyStream : Stream
+        /// <remarks>
+        /// Internal rather than private because the framed reading tests need
+        /// the same source: a stream that cannot say how much is left is the
+        /// case that reader exists for.
+        /// </remarks>
+        internal sealed class ForwardOnlyStream : Stream
         {
             private readonly MemoryStream _inner;
 

@@ -128,8 +128,20 @@ namespace Owid.Client
             Model.Owid owid,
             Model.Owid[] others)
         {
+            return SignWithOthers(owid, others, DateTime.UtcNow);
+        }
+
+        /// <summary>
+        /// Sign the OWID provided AND the other OWIDs provided, stamping it
+        /// with the date given rather than the moment of signing.
+        /// </summary>
+        internal Model.Owid SignWithOthers(
+            Model.Owid owid,
+            Model.Owid[] others,
+            DateTime date)
+        {
             owid.Domain = Domain;
-            owid.Date = DateTime.UtcNow;
+            owid.Date = ToStampedDate(date);
             var data = owid.GetDataForCrypto(others);
             owid.SignatureInternal = Crypto.SignData(
                 data,
@@ -189,13 +201,83 @@ namespace Owid.Client
         /// </remarks>
         public Model.Owid Create(byte[] value, params Model.Owid[] others)
         {
+            return Create(value, DateTime.UtcNow, others);
+        }
+
+        /// <summary>
+        /// Creates and signs an OWID carrying the value and the date, with
+        /// the other OWIDs covered by the signature.
+        /// </summary>
+        /// <param name="value">Payload value</param>
+        /// <param name="date">
+        /// The date the OWID states. A caller that wants an OWID to say less
+        /// than the moment it was made - the day rather than the minute, say,
+        /// so that two identifiers issued to the same person an hour apart
+        /// cannot be told apart by their dates - supplies that date here.
+        /// Converted to UTC, and truncated to the whole minute the wire
+        /// format carries, so the OWID in hand states exactly what its bytes
+        /// state.
+        /// </param>
+        /// <param name="others">
+        /// OWIDs this one is signed alongside.
+        /// </param>
+        /// <returns>Signed OWID with the payload and date provided.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// <paramref name="date"/> is before the base date the format counts
+        /// minutes from. That date cannot be written, and casting it into the
+        /// count would silently record a far later one.
+        /// </exception>
+        public Model.Owid Create(
+            byte[] value,
+            DateTime date,
+            params Model.Owid[] others)
+        {
             if (value == null)
             {
                 throw new ArgumentNullException(nameof(value));
             }
             var owid = new Model.Owid();
             owid.PayloadInternal = (byte[])value.Clone();
-            return SignWithOthers(owid, others ?? Constants.Empty);
+            return SignWithOthers(owid, others ?? Constants.Empty, date);
+        }
+
+        /// <summary>
+        /// The date as the OWID will state it: UTC, and whole minutes,
+        /// because versions 2 and 3 count minutes since
+        /// <see cref="Constants.BaseDate"/> and anything finer is dropped on
+        /// the way to the bytes. Doing it here means the OWID a caller holds
+        /// says the same thing as the OWID it hands on, which matters because
+        /// the signature covers the bytes.
+        /// </summary>
+        /// <remarks>
+        /// A date of <see cref="DateTimeKind.Unspecified"/> is taken as UTC.
+        /// The alternative, reading it as local time, would silently move an
+        /// identifier by the machine's offset and make the same call produce
+        /// different OWIDs on different servers.
+        /// </remarks>
+        private static DateTime ToStampedDate(DateTime date)
+        {
+            var utc = date.Kind == DateTimeKind.Local
+                ? date.ToUniversalTime()
+                : DateTime.SpecifyKind(date, DateTimeKind.Utc);
+            if (utc < Constants.BaseDate)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(date),
+                    utc,
+                    "an OWID counts minutes from " +
+                    $"'{Constants.BaseDate:u}' and cannot state a date " +
+                    "before it");
+            }
+            // No upper bound is needed. The wire format's four byte count
+            // runs past the end of the year 9999, which is where a DateTime
+            // stops, so every date a caller can hand over fits once it is
+            // cut to whole minutes. The reader has the opposite problem and
+            // guards it: the bytes can state a minute this runtime cannot
+            // hold.
+            var minutes = (utc - Constants.BaseDate).Ticks
+                / TimeSpan.TicksPerMinute;
+            return Constants.BaseDate.AddMinutes(minutes);
         }
 
         /// <summary>

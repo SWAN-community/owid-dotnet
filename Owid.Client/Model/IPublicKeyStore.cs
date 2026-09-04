@@ -24,11 +24,19 @@ namespace Owid.Client.Model
     public interface IPublicKeyStore
     {
         /// <summary>
-        /// The public key (PEM) that was current at the given date, expressed
-        /// as minutes since 2020-01-01 UTC (the OWID date encoding). When the
-        /// date is null the current key is returned. Returns null when the date
-        /// predates the oldest known key.
+        /// The public key (PEM) that was in force at the given date,
+        /// expressed as minutes since 2020-01-01 UTC (the OWID date
+        /// encoding). When the date is null the key in force now is
+        /// returned. Returns null when the date precedes the oldest known
+        /// key.
         /// </summary>
+        /// <remarks>
+        /// In force means the key the creator was signing with at that date,
+        /// which for a creator that publishes its schedule ahead of time is
+        /// not the newest key it holds. An implementation that returns a key
+        /// whose period has not begun makes every genuine identifier of that
+        /// date read as forged.
+        /// </remarks>
         /// <param name="dateMinutes">
         /// Minutes since 2020-01-01 UTC, or null for the current key.
         /// </param>

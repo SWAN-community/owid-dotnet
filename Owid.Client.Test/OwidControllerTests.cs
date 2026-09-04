@@ -99,8 +99,8 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -121,7 +121,7 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -138,8 +138,8 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -160,7 +160,7 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {

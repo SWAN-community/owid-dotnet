@@ -255,14 +255,15 @@ backwards compatibility.
 
 By default the public-key endpoint returns the single key from
 `OwidConfiguration`. A creator that rotates its signing key can serve the key
-that was current at a given date by registering an `IPublicKeyStore` (types in
-`Owid.Client.Model`):
+that was in force at a given date by registering an `IPublicKeyStore` (types in
+`Owid.Client.Model`). Each key carries the moment its period starts, and it
+holds until the next key starts:
 
 ```csharp
 builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
 {
-    new DatedPublicKey { Created = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = previousPem },
-    new DatedPublicKey { Created = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = currentPem },
+    new DatedPublicKey { StartsAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = previousPem },
+    new DatedPublicKey { StartsAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = currentPem },
 }));
 ```
 
@@ -271,9 +272,18 @@ number of minutes since `2020-01-01` UTC (the OWID Date encoding):
 
 `GET /owid/api/v1/public-key?date=<minutes>`
 
-The endpoint returns the key with the latest `Created` on or before `date`, the
-current key when `date` is omitted, and `404` when `date` predates the oldest
-known key. Implement `IPublicKeyStore` to plug in any key source.
+The endpoint returns the key with the latest `StartsAt` on or before `date`,
+the key in force now when `date` is omitted, and `404` when `date` precedes
+the oldest known key. Implement `IPublicKeyStore` to plug in any key source.
+
+`StartsAt` is the schedule position and not the moment the key material was
+generated. The two only agree whilst keys are generated one period at a time,
+and a creator that writes several future periods in one run breaks the
+agreement, so selecting on the moment of generation then returns a key whose
+period has not started and every genuine identifier of that period reads as
+forged. Give this store the start of each period. For the same reason, a
+store with no date to work from must answer with the key in force now rather
+than the last entry of a schedule written ahead of time.
 
 ### Requiring authentication (optional)
 

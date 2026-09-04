@@ -21,14 +21,23 @@ using System.Linq;
 namespace Owid.Client.Model
 {
     /// <summary>
-    /// A signing public key together with the date it was created.
+    /// A signing public key together with the moment it comes into force.
     /// </summary>
     public class DatedPublicKey
     {
         /// <summary>
-        /// The UTC date the key was created.
+        /// The UTC moment from which this key signs. It stays in force until
+        /// the next key starts, so the last key of a schedule covers every
+        /// date after it.
         /// </summary>
-        public DateTime Created { get; set; }
+        /// <remarks>
+        /// This is the schedule position, not the moment the key material
+        /// was generated. The two are not the same, because a creator may
+        /// generate many weeks of keys in one run, and selecting on the
+        /// moment of generation then picks a key whose period has not
+        /// started. See <see cref="DatedKeyStore"/> for what that did.
+        /// </remarks>
+        public DateTime StartsAt { get; set; }
 
         /// <summary>
         /// The public key in PEM form.
@@ -37,15 +46,29 @@ namespace Owid.Client.Model
     }
 
     /// <summary>
-    /// <see cref="IPublicKeyStore"/> over a set of dated keys. Returns the key
-    /// that was current at the requested date: the newest key created on or
-    /// before it. A date that predates every key yields null.
+    /// <see cref="IPublicKeyStore"/> over a set of scheduled keys. Returns
+    /// the key that was in force at the requested date, being the latest key
+    /// whose <see cref="DatedPublicKey.StartsAt"/> is at or before it. A date
+    /// that precedes every key yields null.
     /// </summary>
+    /// <remarks>
+    /// Selection used to run on the moment each key was generated, which was
+    /// a fair stand-in whilst keys were generated one per week, so the order
+    /// of generation matched the order of the schedule. It stopped being one
+    /// on 1 September 2026, when a 51Degrees creator wrote thirteen keys in a
+    /// single run. All thirteen shared one moment of generation whilst their
+    /// start dates ran forward a week at a time, so an identifier dated
+    /// 4 September 2026 selected the key that starts on 7 September and the
+    /// signature came back as invalid. Invalid is the answer that means
+    /// forgery, so genuine identifiers were rejected as forged. The published
+    /// schedule and one of those identifiers are the fixture behind
+    /// PublishedScheduleTests.
+    /// </remarks>
     public class DatedKeyStore : IPublicKeyStore
     {
-        // Sorted newest first once at construction so each lookup is a simple
+        // Sorted latest first once at construction so each lookup is a simple
         // scan rather than re-sorting on every request.
-        private readonly IReadOnlyList<DatedPublicKey> _keysNewestFirst;
+        private readonly IReadOnlyList<DatedPublicKey> _keysLatestFirst;
 
         /// <summary>
         /// Designated constructor.
@@ -53,7 +76,7 @@ namespace Owid.Client.Model
         /// <param name="keys">The known keys, in any order.</param>
         public DatedKeyStore(IEnumerable<DatedPublicKey> keys)
         {
-            _keysNewestFirst = keys.OrderByDescending(k => k.Created).ToList();
+            _keysLatestFirst = keys.OrderByDescending(k => k.StartsAt).ToList();
         }
 
         /// <inheritdoc/>
@@ -61,7 +84,12 @@ namespace Owid.Client.Model
         {
             if (dateMinutes == null)
             {
-                return _keysNewestFirst.FirstOrDefault()?.PublicKey;
+                // The key in force now, which is not the last key of the
+                // schedule. A schedule is written ahead of time, so its last
+                // entry is usually a key whose period has not begun, and
+                // serving that as the current key would fail every check of
+                // an identifier signed today.
+                return InForceAt(DateTime.UtcNow);
             }
 
             // A date past the end of 9999 is after every key. Judged before
@@ -72,8 +100,10 @@ namespace Owid.Client.Model
                 ? DateTime.MaxValue
                 : Constants.BaseDate.AddMinutes(dateMinutes.Value);
 
-            return _keysNewestFirst
-                .FirstOrDefault(k => k.Created <= requested)?.PublicKey;
+            return InForceAt(requested);
         }
+
+        private string? InForceAt(DateTime at) => _keysLatestFirst
+            .FirstOrDefault(k => k.StartsAt <= at)?.PublicKey;
     }
 }

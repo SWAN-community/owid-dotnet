@@ -44,6 +44,11 @@
             of <see cref="N:Owid"/> signatures.
             </summary>
         </member>
+        <member name="F:Owid.Client.Controllers.OwidController.OwidBaseDate">
+            <summary>
+            The moment the OWID date encoding counts minutes from.
+            </summary>
+        </member>
         <member name="M:Owid.Client.Controllers.OwidController.#ctor(Owid.Client.Model.Configuration.OwidConfiguration,Owid.Client.Model.IPublicKeyStore,Owid.Client.Controllers.IOwidAuthorizer)">
             <summary>
             Designated constructor.
@@ -58,10 +63,22 @@
             endpoints are open, per the OWID specification's default.
             </param>
         </member>
+        <member name="M:Owid.Client.Controllers.OwidController.ClampToNow(System.Nullable{System.UInt32})">
+            <summary>
+            The requested date, or the moment of the request where the date is
+            later than that. A schedule is published ahead of time, so a date
+            in the future names a key that has not started and has signed
+            nothing, and the key in force now is the only honest answer for
+            it. A count past the range of <see cref="T:System.DateTime"/> is later than
+            now as well, so it takes the same answer rather than an error.
+            </summary>
+        </member>
         <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32})">
             <summary>
             Returns the public key for the OWID creator. With a date, returns
-            the key that was current at that date; without one, the current key.
+            the key in force at that date; without one, the key in force now.
+            A date later than the moment of the request is read as that
+            moment.
             </summary>
             <param name="date">
             Optional date as minutes since 2020-01-01 UTC (the OWID date
@@ -74,8 +91,10 @@
         <member name="M:Owid.Client.Controllers.OwidController.GetCreator(System.Nullable{System.UInt32})">
             <summary>
             Returns the creator domain and signing public key. With a date,
-            returns the key that was current at that date; without one, the
-            current key. This matches the public-key end point so the two agree.
+            returns the key in force at that date; without one, the key in
+            force now, and a date later than the moment of the request is read
+            as that moment. This matches the public-key end point so the two
+            agree.
             </summary>
             <param name="date">
             Optional date as minutes since 2020-01-01 UTC (the OWID date

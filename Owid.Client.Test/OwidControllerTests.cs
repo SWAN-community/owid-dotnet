@@ -99,8 +99,8 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -121,7 +121,7 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -138,8 +138,8 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { Created = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -160,13 +160,81 @@ namespace Owid.Client.Test
         {
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { Created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
                 // 1440 minutes after the epoch is 2020-01-02, before the key.
                 var result = await controller.GetPublicKey(1440);
                 Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
+            }
+        }
+
+        /// <summary>
+        /// An undated request when no key has started yet is a 404 on both
+        /// end points, never a success with no key in it. A schedule is
+        /// published ahead of time, so this is an ordinary state for a
+        /// creator whose first period has not begun.
+        /// </summary>
+        [TestMethod]
+        public async Task TestNothingInForceYetReturns404OnBothEndPoints()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey
+                {
+                    StartsAt = DateTime.UtcNow.AddDays(7),
+                    PublicKey = "not-started",
+                },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                Assert.IsInstanceOfType(
+                    (await controller.GetPublicKey()).Result,
+                    typeof(NotFoundResult));
+                Assert.IsInstanceOfType(
+                    (await controller.GetCreator()).Result,
+                    typeof(NotFoundResult));
+            }
+        }
+
+        /// <summary>
+        /// A date later than the moment of the request is read as that
+        /// moment, so a key whose period has not started is never handed
+        /// out. This is what the 51Degrees cloud does with the same request.
+        /// </summary>
+        [TestMethod]
+        public async Task TestFutureDateIsReadAsNowOnBothEndPoints()
+        {
+            var now = DateTime.UtcNow;
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey
+                {
+                    StartsAt = now.AddDays(-7),
+                    PublicKey = "in-force",
+                },
+                new DatedPublicKey
+                {
+                    StartsAt = now.AddDays(7),
+                    PublicKey = "not-started",
+                },
+            });
+            var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var nextMonth = (uint)(now.AddDays(30) - epoch).TotalMinutes;
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                Assert.AreEqual(
+                    "in-force",
+                    (await controller.GetPublicKey(nextMonth)).Value);
+                Assert.AreEqual(
+                    "in-force",
+                    (await controller.GetCreator(nextMonth)).Value!.PublicKeySPKI);
+                // The largest value the parameter can carry is later than
+                // now as well, so it takes the same answer.
+                Assert.AreEqual(
+                    "in-force",
+                    (await controller.GetPublicKey(uint.MaxValue)).Value);
             }
         }
 

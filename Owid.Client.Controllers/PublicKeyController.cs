@@ -1,4 +1,4 @@
-﻿/* ****************************************************************************
+/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Owid.Client.Model;
 using Owid.Client.Model.Configuration;
+using System;
 using System.Threading.Tasks;
 
 namespace Owid.Client.Controllers
@@ -35,6 +36,12 @@ namespace Owid.Client.Controllers
         private readonly OwidConfiguration _owidConfiguration;
         private readonly IPublicKeyStore _publicKeyStore;
         private readonly IOwidAuthorizer? _authorizer;
+
+        /// <summary>
+        /// The moment the OWID date encoding counts minutes from.
+        /// </summary>
+        private static readonly DateTime OwidBaseDate =
+            new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         /// <summary>
         /// Designated constructor.
@@ -60,8 +67,31 @@ namespace Owid.Client.Controllers
         }
 
         /// <summary>
+        /// The requested date, or the moment of the request where the date is
+        /// later than that. A schedule is published ahead of time, so a date
+        /// in the future names a key that has not started and has signed
+        /// nothing, and the key in force now is the only honest answer for
+        /// it. A count past the range of <see cref="DateTime"/> is later than
+        /// now as well, so it takes the same answer rather than an error.
+        /// </summary>
+        private static uint? ClampToNow(uint? date)
+        {
+            if (date == null)
+            {
+                return null;
+            }
+            var nowMinutes = (DateTime.UtcNow - OwidBaseDate).TotalMinutes;
+            var now = nowMinutes >= uint.MaxValue
+                ? uint.MaxValue
+                : (uint)nowMinutes;
+            return Math.Min(date.Value, now);
+        }
+
+        /// <summary>
         /// Returns the public key for the OWID creator. With a date, returns
-        /// the key that was current at that date; without one, the current key.
+        /// the key in force at that date; without one, the key in force now.
+        /// A date later than the moment of the request is read as that
+        /// moment.
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
@@ -83,9 +113,13 @@ namespace Owid.Client.Controllers
             {
                 return denied;
             }
-            var key = _publicKeyStore.GetPublicKey(date);
-            if (date.HasValue && key == null)
+            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
+            if (key == null)
             {
+                // Nothing is in force at the requested moment, which for an
+                // undated request means no key has started yet. Answered as
+                // not found rather than as an empty success, so a verifier
+                // never reads a missing key as a key.
                 return NotFound();
             }
             return key;
@@ -94,8 +128,10 @@ namespace Owid.Client.Controllers
 
         /// <summary>
         /// Returns the creator domain and signing public key. With a date,
-        /// returns the key that was current at that date; without one, the
-        /// current key. This matches the public-key end point so the two agree.
+        /// returns the key in force at that date; without one, the key in
+        /// force now, and a date later than the moment of the request is read
+        /// as that moment. This matches the public-key end point so the two
+        /// agree.
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
@@ -119,8 +155,8 @@ namespace Owid.Client.Controllers
             {
                 return denied;
             }
-            var key = _publicKeyStore.GetPublicKey(date);
-            if (date.HasValue && key == null)
+            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
+            if (key == null)
             {
                 return NotFound();
             }

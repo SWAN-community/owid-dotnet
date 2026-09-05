@@ -23,6 +23,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- A genuine identifier and the key schedule its creator published,
+         read by PublishedScheduleTests. Named explicitly so the test asks
+         for the file name rather than a name MSBuild derives. -->
+    <EmbeddedResource Include="Data\51did-published-keys.json">
+      <LogicalName>51did-published-keys.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Data\51did-published-identifier.json">
+      <LogicalName>51did-published-identifier.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Owid.Client\Owid.Client.csproj" />
     <ProjectReference Include="..\Owid.Client.Controllers\Owid.Client.Controllers.csproj" />
   </ItemGroup>

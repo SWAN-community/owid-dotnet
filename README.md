@@ -270,11 +270,14 @@ builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
 Callers pass the OWID's own date as `?date=<minutes>`, where `date` is the
 number of minutes since `2020-01-01` UTC (the OWID Date encoding):
 
-`GET /owid/api/v1/public-key?date=<minutes>`
+`GET /owid/api/v3/public-key?date=<minutes>`
 
 The endpoint returns the key with the latest `StartsAt` on or before `date`,
 the key in force now when `date` is omitted, and `404` when `date` precedes
-the oldest known key. Implement `IPublicKeyStore` to plug in any key source.
+the oldest known key or when no key is in force at all. A `date` later than
+the moment of the request is read as that moment, because a schedule is
+published ahead of time and a key that has not started has signed nothing.
+Implement `IPublicKeyStore` to plug in any key source.
 
 `StartsAt` is the schedule position and not the moment the key material was
 generated. The two only agree whilst keys are generated one period at a time,

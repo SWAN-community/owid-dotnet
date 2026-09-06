@@ -126,8 +126,10 @@ using (var crypto = ECDsa.Create())
     var valid = await owid!.VerifyAsync(crypto);
 }
 
-// Or verify by fetching the public key from the creator's domain.
-var validFromDomain = await owid!.VerifyAsync();
+// Or verify by fetching the public key from the creator's domain. The fetch
+// is asynchronous, with no synchronous form, and takes an optional
+// cancellation token that ends this caller's wait for the key.
+var validFromDomain = await owid!.VerifyAsync(cancellationToken);
 ```
 
 ### Read an OWID, and what a failure means

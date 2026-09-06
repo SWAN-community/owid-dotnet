@@ -36,26 +36,12 @@ namespace Owid.Client.Test
     [TestClass]
     public class RedirectTests
     {
-        private static HttpListener Listen(out string prefix)
-        {
-            // A free port, found by binding and releasing it.
-            var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-            probe.Start();
-            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            prefix = $"http://127.0.0.1:{port}/";
-            var listener = new HttpListener();
-            listener.Prefixes.Add(prefix);
-            listener.Start();
-            return listener;
-        }
-
         [TestMethod]
-        public void ARedirectIsNotFollowed()
+        public async Task ARedirectIsNotFollowed()
         {
             var elsewhereHits = 0;
-            using var elsewhere = Listen(out var elsewherePrefix);
-            using var creator = Listen(out var creatorPrefix);
+            using var elsewhere = Loopback.Listen(out var elsewherePrefix);
+            using var creator = Loopback.Listen(out var creatorPrefix);
             using var stop = new CancellationTokenSource();
 
             var serveElsewhere = Task.Run(async () =>
@@ -93,12 +79,8 @@ namespace Owid.Client.Test
                 HttpRequestException? refused = null;
                 try
                 {
-                    CryptoExtensions.GetPublicKey(url);
+                    await CryptoExtensions.GetPublicKeyAsync(url);
                     Assert.Fail("a redirect must not yield a key");
-                }
-                catch (AggregateException thrown)
-                {
-                    refused = thrown.InnerException as HttpRequestException;
                 }
                 catch (HttpRequestException thrown)
                 {

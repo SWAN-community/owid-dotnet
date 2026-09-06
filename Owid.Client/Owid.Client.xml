@@ -227,16 +227,40 @@
             compressed data streams.
             </summary>
         </member>
-        <member name="F:Owid.Client.CryptoExtensions._publicKeyCache">
+        <member name="F:Owid.Client.CryptoExtensions.MaximumCachedKeys">
             <summary>
-            Cache used to avoid repeat requests for the same public keys.
+            The most public keys held at once. The cache is emptied rather
+            than trimmed when it reaches this, which costs the keys still in
+            use one request each as they are asked for again and keeps the
+            bookkeeping to a count. The Java and Python ports hold the same
+            number the same way.
             </summary>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid)">
+        <member name="F:Owid.Client.CryptoExtensions._publicKeyCache">
             <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
+            Cache used to avoid repeat requests for the same public keys. One
+            entry per key URL, holding the fetch, so that callers arriving
+            together share one request rather than each making their own and
+            a caller arriving later is answered without one.
+            </summary>
+            <remarks>
+            A key URL carries the domain and the date of the OWID being
+            verified, neither of which this process chooses, so the number of
+            distinct URLs is set by the OWIDs presented to it. The cache is
+            therefore bounded by <see cref="F:Owid.Client.CryptoExtensions.MaximumCachedKeys"/>.
+            </remarks>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
+            <summary>
+            Verify that <see cref="N:Owid"/> signature is correct, fetching the
+            public key from the creator's domain over HTTPS.
             </summary>
             <param name="owid"></param>
+            <param name="cancellationToken">
+            Ends this caller's wait for the key. See
+            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
+            that does and does not cancel.
+            </param>
             <returns></returns>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa)">
@@ -247,12 +271,19 @@
             <param name="crypto"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
             <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
+            Verify that <see cref="N:Owid"/> signature is correct over the
+            others it was signed with, fetching the public key from the
+            creator's domain over HTTPS.
             </summary>
             <param name="owid"></param>
             <param name="others"></param>
+            <param name="cancellationToken">
+            Ends this caller's wait for the key. See
+            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
+            that does and does not cancel.
+            </param>
             <returns></returns>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
@@ -315,21 +346,53 @@
             <param name="others"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.GetPublicKey(Owid.Client.Model.Owid,System.String)">
+        <member name="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(Owid.Client.Model.Owid,System.String,System.Threading.CancellationToken)">
             <summary>
-            Gets the public key for the owid.
+            Gets the public key for the owid from the creator's domain.
             </summary>
             <param name="owid"></param>
             <param name="scheme"></param>
+            <param name="cancellationToken"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.GetPublicKey(System.Uri)">
+        <member name="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)">
             <summary>
-            Get the public key from the domain contained in the OWID if it is 
-            not already contained in the cache.
+            Get the public key PEM from the URL if it is not already in the
+            cache. Callers arriving while a fetch for the same URL is in
+            flight share that fetch rather than starting their own.
             </summary>
+            <remarks>
+            The token ends this caller's wait, not the shared request. A
+            request one caller started is usually the request every other
+            caller for the same key is waiting on, so letting one caller
+            abandon the request for all of them would turn one timeout into
+            many. The request runs to completion and the next caller finds
+            the key in the cache.
+            </remarks>
             <param name="u"></param>
+            <param name="cancellationToken"></param>
             <returns></returns>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.FetchIntoAsync(System.Uri,System.Threading.Tasks.TaskCompletionSource{System.String})">
+            <summary>
+            Perform the request for <paramref name="u"/> and put its outcome
+            into <paramref name="source"/>, which is the task every caller
+            for that URL is waiting on.
+            </summary>
+            <remarks>
+            A fetch that fails is taken out of the cache, so the next caller
+            makes a fresh request rather than being handed the old failure.
+            The entry is matched on identity as well as URL, so a fetch that
+            fails after the cache was emptied and filled again removes only
+            itself and never whatever replaced it.
+            </remarks>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.ClearPublicKeyCache">
+            <summary>
+            Empty the public key cache, so that the next verification of any
+            OWID fetches the creator's key again. The Java and Python ports
+            offer the same.
+            </summary>
         </member>
         <member name="T:Owid.Client.Extensions">
             <summary>

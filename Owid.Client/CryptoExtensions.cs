@@ -16,10 +16,12 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using Owid.Client.Model;
 
@@ -53,26 +55,49 @@ namespace Owid.Client
 			};
 
 		/// <summary>
-		/// Cache used to avoid repeat requests for the same public keys.
+		/// The most public keys held at once. The cache is emptied rather
+		/// than trimmed when it reaches this, which costs the keys still in
+		/// use one request each as they are asked for again and keeps the
+		/// bookkeeping to a count. The Java and Python ports hold the same
+		/// number the same way.
 		/// </summary>
-		private static readonly ConcurrentDictionary<
-			Uri,
-			WeakReference<string>> _publicKeyCache = 
-			new ConcurrentDictionary<
-				Uri, 
-				WeakReference<string>>();
+		private const int MaximumCachedKeys = 1024;
 
 		/// <summary>
-		/// Verify that <see cref="Owid"/> signature is correct.
+		/// Cache used to avoid repeat requests for the same public keys. One
+		/// entry per key URL, holding the fetch, so that callers arriving
+		/// together share one request rather than each making their own and
+		/// a caller arriving later is answered without one.
+		/// </summary>
+		/// <remarks>
+		/// A key URL carries the domain and the date of the OWID being
+		/// verified, neither of which this process chooses, so the number of
+		/// distinct URLs is set by the OWIDs presented to it. The cache is
+		/// therefore bounded by <see cref="MaximumCachedKeys"/>.
+		/// </remarks>
+		private static readonly ConcurrentDictionary<
+			Uri,
+			Task<string>> _publicKeyCache =
+			new ConcurrentDictionary<
+				Uri,
+				Task<string>>();
+
+		/// <summary>
+		/// Verify that <see cref="Owid"/> signature is correct, fetching the
+		/// public key from the creator's domain over HTTPS.
 		/// </summary>
 		/// <param name="owid"></param>
+		/// <param name="cancellationToken">
+		/// Ends this caller's wait for the key. See
+		/// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
+		/// that does and does not cancel.
+		/// </param>
 		/// <returns></returns>
-		public static async Task<bool> VerifyAsync(this Model.Owid owid)
+		public static Task<bool> VerifyAsync(
+			this Model.Owid owid,
+			CancellationToken cancellationToken = default)
 		{
-			using (var crypto = owid.GetPublicKey("https"))
-			{
-				return await owid.VerifyAsync(crypto, Constants.Empty);
-			}
+			return owid.VerifyAsync(Constants.Empty, cancellationToken);
 		}
 
         /// <summary>
@@ -89,18 +114,28 @@ namespace Owid.Client
 		}
 
         /// <summary>
-        /// Verify that <see cref="Owid"/> signature is correct.
+        /// Verify that <see cref="Owid"/> signature is correct over the
+        /// others it was signed with, fetching the public key from the
+        /// creator's domain over HTTPS.
         /// </summary>
         /// <param name="owid"></param>
         /// <param name="others"></param>
+        /// <param name="cancellationToken">
+        /// Ends this caller's wait for the key. See
+        /// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
+        /// that does and does not cancel.
+        /// </param>
         /// <returns></returns>
         public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
-			params Model.Owid[] others)
+			Model.Owid[] others,
+			CancellationToken cancellationToken = default)
 		{
-			using (var crypto = owid.GetPublicKey("https"))
+			using (var crypto = await owid.GetPublicKeyAsync(
+				"https",
+				cancellationToken).ConfigureAwait(false))
 			{
-				return await owid.VerifyAsyncWithOthers(crypto, others);
+				return owid.Verify(crypto, others);
 			}
 		}
 
@@ -274,14 +309,16 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Gets the public key for the owid.
+		/// Gets the public key for the owid from the creator's domain.
 		/// </summary>
 		/// <param name="owid"></param>
 		/// <param name="scheme"></param>
+		/// <param name="cancellationToken"></param>
 		/// <returns></returns>
-		private static ECDsa GetPublicKey(
+		private static async Task<ECDsa> GetPublicKeyAsync(
 			this Model.Owid owid,
-			string scheme)
+			string scheme,
+			CancellationToken cancellationToken)
         {
             // Construct the URL to get the public key.
             UriBuilder u = new UriBuilder(
@@ -297,7 +334,9 @@ namespace Owid.Client
                 : "format=pkcs";
 
 			// Fetch the public key PEM associated with the OWID.
-			var publicKeyPem = GetPublicKey(u.Uri);
+			var publicKeyPem = await GetPublicKeyAsync(
+				u.Uri,
+				cancellationToken).ConfigureAwait(false);
 
 			// Reject an empty or whitespace PEM with a clear message rather
 			// than relying on the opaque exception thrown by ImportFromPem.
@@ -314,29 +353,95 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Get the public key from the domain contained in the OWID if it is 
-		/// not already contained in the cache.
+		/// Get the public key PEM from the URL if it is not already in the
+		/// cache. Callers arriving while a fetch for the same URL is in
+		/// flight share that fetch rather than starting their own.
 		/// </summary>
+		/// <remarks>
+		/// The token ends this caller's wait, not the shared request. A
+		/// request one caller started is usually the request every other
+		/// caller for the same key is waiting on, so letting one caller
+		/// abandon the request for all of them would turn one timeout into
+		/// many. The request runs to completion and the next caller finds
+		/// the key in the cache.
+		/// </remarks>
 		/// <param name="u"></param>
+		/// <param name="cancellationToken"></param>
 		/// <returns></returns>
         // Internal rather than private so the test project can point it
         // at a stand in end point by URL, since the domain an OWID carries
         // cannot name a port.
-        internal static string GetPublicKey(Uri u)
+        internal static Task<string> GetPublicKeyAsync(
+			Uri u,
+			CancellationToken cancellationToken = default)
         {
-			var publicKeyRef = _publicKeyCache.GetOrAdd(
-				u,
-				(u) =>
+			if (_publicKeyCache.TryGetValue(u, out var held) == false)
+			{
+				// Emptied rather than allowed to grow without limit, because
+				// the URLs asked for come from the OWIDs presented to this
+				// process rather than from the process itself.
+				if (_publicKeyCache.Count >= MaximumCachedKeys)
 				{
-					return new WeakReference<string>(new HttpClient(
-						_handler).GetStringAsync(u).Result);
-				});
-            if (publicKeyRef.TryGetTarget(out var publicKey) == false)
-            {
-				publicKey = new HttpClient(_handler).GetStringAsync(u).Result;
-				publicKeyRef.SetTarget(publicKey);
+					_publicKeyCache.Clear();
+				}
+				var source = new TaskCompletionSource<string>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+				held = _publicKeyCache.GetOrAdd(u, source.Task);
+				if (ReferenceEquals(held, source.Task))
+				{
+					// This caller is the one that added the entry, so this
+					// caller is the one that performs the request. Every
+					// other caller waits on the task just added.
+					_ = FetchIntoAsync(u, source);
+				}
 			}
-			return publicKey;
+			return held.WaitAsync(cancellationToken);
         }
-    }
+
+		/// <summary>
+		/// Perform the request for <paramref name="u"/> and put its outcome
+		/// into <paramref name="source"/>, which is the task every caller
+		/// for that URL is waiting on.
+		/// </summary>
+		/// <remarks>
+		/// A fetch that fails is taken out of the cache, so the next caller
+		/// makes a fresh request rather than being handed the old failure.
+		/// The entry is matched on identity as well as URL, so a fetch that
+		/// fails after the cache was emptied and filled again removes only
+		/// itself and never whatever replaced it.
+		/// </remarks>
+		private static async Task FetchIntoAsync(
+			Uri u,
+			TaskCompletionSource<string> source)
+		{
+			try
+			{
+				// disposeHandler is false because the handler is shared and
+				// static. The constructor that takes a handler alone
+				// disposes it with the client, so a caller who later wrapped
+				// this in a using would take the handler away from every
+				// other fetch, and with it the refusal to follow redirects.
+				var publicKey = await new HttpClient(_handler, false)
+					.GetStringAsync(u)
+					.ConfigureAwait(false);
+				source.SetResult(publicKey);
+			}
+			catch (Exception e)
+			{
+				_publicKeyCache.TryRemove(
+					new KeyValuePair<Uri, Task<string>>(u, source.Task));
+				source.SetException(e);
+			}
+		}
+
+		/// <summary>
+		/// Empty the public key cache, so that the next verification of any
+		/// OWID fetches the creator's key again. The Java and Python ports
+		/// offer the same.
+		/// </summary>
+		public static void ClearPublicKeyCache()
+		{
+			_publicKeyCache.Clear();
+		}
+	}
 }

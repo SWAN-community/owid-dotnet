@@ -416,7 +416,12 @@ namespace Owid.Client
 		{
 			try
 			{
-				var publicKey = await new HttpClient(_handler)
+				// disposeHandler is false because the handler is shared and
+				// static. The constructor that takes a handler alone
+				// disposes it with the client, so a caller who later wrapped
+				// this in a using would take the handler away from every
+				// other fetch, and with it the refusal to follow redirects.
+				var publicKey = await new HttpClient(_handler, false)
 					.GetStringAsync(u)
 					.ConfigureAwait(false);
 				source.SetResult(publicKey);

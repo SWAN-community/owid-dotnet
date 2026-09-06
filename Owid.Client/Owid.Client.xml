@@ -227,13 +227,28 @@
             compressed data streams.
             </summary>
         </member>
+        <member name="F:Owid.Client.CryptoExtensions.MaximumCachedKeys">
+            <summary>
+            The most public keys held at once. The cache is emptied rather
+            than trimmed when it reaches this, which costs the keys still in
+            use one request each as they are asked for again and keeps the
+            bookkeeping to a count. The Java and Python ports hold the same
+            number the same way.
+            </summary>
+        </member>
         <member name="F:Owid.Client.CryptoExtensions._publicKeyCache">
             <summary>
             Cache used to avoid repeat requests for the same public keys. One
-            entry per key URL, holding the PEM weakly once it has arrived and
-            the fetch in flight while it has not, so that callers arriving
-            together share one request rather than each making their own.
+            entry per key URL, holding the fetch, so that callers arriving
+            together share one request rather than each making their own and
+            a caller arriving later is answered without one.
             </summary>
+            <remarks>
+            A key URL carries the domain and the date of the OWID being
+            verified, neither of which this process chooses, so the number of
+            distinct URLs is set by the OWIDs presented to it. The cache is
+            therefore bounded by <see cref="F:Owid.Client.CryptoExtensions.MaximumCachedKeys"/>.
+            </remarks>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
             <summary>
@@ -358,15 +373,25 @@
             <param name="cancellationToken"></param>
             <returns></returns>
         </member>
-        <member name="T:Owid.Client.CryptoExtensions.PublicKeyCacheEntry">
+        <member name="M:Owid.Client.CryptoExtensions.FetchIntoAsync(System.Uri,System.Threading.Tasks.TaskCompletionSource{System.String})">
             <summary>
-            The cache's view of one key URL. The PEM is held weakly so that
-            memory pressure can reclaim it and a later caller fetches again,
-            which is the behaviour the cache has always had. The fetch in
-            flight is held strongly for as long as it is in flight, so that
-            concurrent callers share it. A fetch that fails is never kept,
-            so the next caller tries again rather than being handed the old
-            failure.
+            Perform the request for <paramref name="u"/> and put its outcome
+            into <paramref name="source"/>, which is the task every caller
+            for that URL is waiting on.
+            </summary>
+            <remarks>
+            A fetch that fails is taken out of the cache, so the next caller
+            makes a fresh request rather than being handed the old failure.
+            The entry is matched on identity as well as URL, so a fetch that
+            fails after the cache was emptied and filled again removes only
+            itself and never whatever replaced it.
+            </remarks>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.ClearPublicKeyCache">
+            <summary>
+            Empty the public key cache, so that the next verification of any
+            OWID fetches the creator's key again. The Java and Python ports
+            offer the same.
             </summary>
         </member>
         <member name="T:Owid.Client.Extensions">

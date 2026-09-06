@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -54,17 +55,32 @@ namespace Owid.Client
 			};
 
 		/// <summary>
-		/// Cache used to avoid repeat requests for the same public keys. One
-		/// entry per key URL, holding the PEM weakly once it has arrived and
-		/// the fetch in flight while it has not, so that callers arriving
-		/// together share one request rather than each making their own.
+		/// The most public keys held at once. The cache is emptied rather
+		/// than trimmed when it reaches this, which costs the keys still in
+		/// use one request each as they are asked for again and keeps the
+		/// bookkeeping to a count. The Java and Python ports hold the same
+		/// number the same way.
 		/// </summary>
+		private const int MaximumCachedKeys = 1024;
+
+		/// <summary>
+		/// Cache used to avoid repeat requests for the same public keys. One
+		/// entry per key URL, holding the fetch, so that callers arriving
+		/// together share one request rather than each making their own and
+		/// a caller arriving later is answered without one.
+		/// </summary>
+		/// <remarks>
+		/// A key URL carries the domain and the date of the OWID being
+		/// verified, neither of which this process chooses, so the number of
+		/// distinct URLs is set by the OWIDs presented to it. The cache is
+		/// therefore bounded by <see cref="MaximumCachedKeys"/>.
+		/// </remarks>
 		private static readonly ConcurrentDictionary<
 			Uri,
-			PublicKeyCacheEntry> _publicKeyCache =
+			Task<string>> _publicKeyCache =
 			new ConcurrentDictionary<
 				Uri,
-				PublicKeyCacheEntry>();
+				Task<string>>();
 
 		/// <summary>
 		/// Verify that <see cref="Owid"/> signature is correct, fetching the
@@ -359,76 +375,68 @@ namespace Owid.Client
 			Uri u,
 			CancellationToken cancellationToken = default)
         {
-			var entry = _publicKeyCache.GetOrAdd(
-				u,
-				static (u) => new PublicKeyCacheEntry());
-			return entry.GetAsync(u).WaitAsync(cancellationToken);
+			if (_publicKeyCache.TryGetValue(u, out var held) == false)
+			{
+				// Emptied rather than allowed to grow without limit, because
+				// the URLs asked for come from the OWIDs presented to this
+				// process rather than from the process itself.
+				if (_publicKeyCache.Count >= MaximumCachedKeys)
+				{
+					_publicKeyCache.Clear();
+				}
+				var source = new TaskCompletionSource<string>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+				held = _publicKeyCache.GetOrAdd(u, source.Task);
+				if (ReferenceEquals(held, source.Task))
+				{
+					// This caller is the one that added the entry, so this
+					// caller is the one that performs the request. Every
+					// other caller waits on the task just added.
+					_ = FetchIntoAsync(u, source);
+				}
+			}
+			return held.WaitAsync(cancellationToken);
         }
 
 		/// <summary>
-		/// The cache's view of one key URL. The PEM is held weakly so that
-		/// memory pressure can reclaim it and a later caller fetches again,
-		/// which is the behaviour the cache has always had. The fetch in
-		/// flight is held strongly for as long as it is in flight, so that
-		/// concurrent callers share it. A fetch that fails is never kept,
-		/// so the next caller tries again rather than being handed the old
-		/// failure.
+		/// Perform the request for <paramref name="u"/> and put its outcome
+		/// into <paramref name="source"/>, which is the task every caller
+		/// for that URL is waiting on.
 		/// </summary>
-		private sealed class PublicKeyCacheEntry
+		/// <remarks>
+		/// A fetch that fails is taken out of the cache, so the next caller
+		/// makes a fresh request rather than being handed the old failure.
+		/// The entry is matched on identity as well as URL, so a fetch that
+		/// fails after the cache was emptied and filled again removes only
+		/// itself and never whatever replaced it.
+		/// </remarks>
+		private static async Task FetchIntoAsync(
+			Uri u,
+			TaskCompletionSource<string> source)
 		{
-			private readonly object _sync = new object();
-			private WeakReference<string>? _publicKey;
-			private Task<string>? _fetch;
-
-			public Task<string> GetAsync(Uri u)
+			try
 			{
-				lock (_sync)
-				{
-					if (_publicKey != null &&
-						_publicKey.TryGetTarget(out var publicKey))
-					{
-						return Task.FromResult(publicKey);
-					}
-					if (_fetch != null)
-					{
-						return _fetch;
-					}
-					var fetch = FetchAsync(u);
-					// A fetch that has already finished has either stored
-					// the key in this entry or failed, and neither is worth
-					// keeping.
-					if (fetch.IsCompleted == false)
-					{
-						_fetch = fetch;
-					}
-					return fetch;
-				}
+				var publicKey = await new HttpClient(_handler)
+					.GetStringAsync(u)
+					.ConfigureAwait(false);
+				source.SetResult(publicKey);
 			}
-
-			private async Task<string> FetchAsync(Uri u)
+			catch (Exception e)
 			{
-				try
-				{
-					var publicKey = await new HttpClient(_handler)
-						.GetStringAsync(u)
-						.ConfigureAwait(false);
-					lock (_sync)
-					{
-						_publicKey = new WeakReference<string>(publicKey);
-					}
-					return publicKey;
-				}
-				finally
-				{
-					// Whether the fetch succeeded or failed, it is no longer
-					// in flight. Only one fetch is ever in flight for an
-					// entry, so the one being cleared is this one.
-					lock (_sync)
-					{
-						_fetch = null;
-					}
-				}
+				_publicKeyCache.TryRemove(
+					new KeyValuePair<Uri, Task<string>>(u, source.Task));
+				source.SetException(e);
 			}
 		}
-    }
+
+		/// <summary>
+		/// Empty the public key cache, so that the next verification of any
+		/// OWID fetches the creator's key again. The Java and Python ports
+		/// offer the same.
+		/// </summary>
+		public static void ClearPublicKeyCache()
+		{
+			_publicKeyCache.Clear();
+		}
+	}
 }

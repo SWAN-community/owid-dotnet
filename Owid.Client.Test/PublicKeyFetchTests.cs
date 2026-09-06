@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -205,6 +205,106 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// The cache does not grow without limit. A key url carries the
+        /// domain and the date of the OWID being verified, so the number of
+        /// distinct urls is chosen by whoever presents the OWIDs rather than
+        /// by this process, and an unbounded cache would grow on their input.
+        /// </summary>
+        [TestMethod]
+        public async Task TheCacheDoesNotGrowWithoutLimit()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, () => Task.FromResult(200));
+
+            try
+            {
+                // One more distinct url than the cache is allowed to hold,
+                // each standing for an OWID with its own date.
+                var maximum = Maximum();
+                for (var i = 0; i <= maximum; i++)
+                {
+                    await CryptoExtensions.GetPublicKeyAsync(new Uri(
+                        prefix + "owid/api/v3/public-key?format=pkcs&date=" + i));
+                }
+
+                Assert.IsTrue(
+                    Held() <= maximum,
+                    "held " + Held() + " of at most " + maximum);
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// Emptying the cache means the next caller fetches again.
+        /// </summary>
+        [TestMethod]
+        public async Task ClearingTheCacheCausesAFreshFetch()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, () =>
+            {
+                Interlocked.Increment(ref hits);
+                return Task.FromResult(200);
+            });
+
+            try
+            {
+                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                await CryptoExtensions.GetPublicKeyAsync(url);
+                await CryptoExtensions.GetPublicKeyAsync(url);
+                Assert.AreEqual(1, hits, "the second call came from the cache");
+
+                CryptoExtensions.ClearPublicKeyCache();
+                await CryptoExtensions.GetPublicKeyAsync(url);
+                Assert.AreEqual(2, hits, "the cache was emptied so this fetched");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// The bound the library holds itself to, read from the library so
+        /// the test cannot drift from it.
+        /// </summary>
+        private static int Maximum()
+        {
+            var field = typeof(CryptoExtensions).GetField(
+                "MaximumCachedKeys",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, "the cache states its own limit");
+            return (int)field!.GetRawConstantValue()!;
+        }
+
+        /// <summary>
+        /// How many keys the cache is holding.
+        /// </summary>
+        private static int Held()
+        {
+            var field = typeof(CryptoExtensions).GetField(
+                "_publicKeyCache",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, "the cache exists");
+            dynamic cache = field!.GetValue(null)!;
+            return (int)cache.Count;
+        }
+
+        /// <summary>
         /// Nothing on the verification surface reaches the network without
         /// returning a task. There was once a synchronous fetch with a
         /// blocking wait inside it, and a caller on a request thread could
@@ -218,6 +318,10 @@ namespace Owid.Client.Test
                     BindingFlags.Public | BindingFlags.NonPublic |
                     BindingFlags.Static | BindingFlags.Instance)
                 .Where(m => m.Name.Contains("PublicKey"))
+                // Emptying the cache is not a fetch, so it is not
+                // required to hand back a task.
+                .Where(m => m.Name != nameof(
+                    CryptoExtensions.ClearPublicKeyCache))
                 .ToArray();
 
             Assert.IsTrue(fetches.Length > 0, "the fetch still exists");

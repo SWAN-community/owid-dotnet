@@ -20,6 +20,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using Owid.Client.Model;
 
@@ -53,26 +54,34 @@ namespace Owid.Client
 			};
 
 		/// <summary>
-		/// Cache used to avoid repeat requests for the same public keys.
+		/// Cache used to avoid repeat requests for the same public keys. One
+		/// entry per key URL, holding the PEM weakly once it has arrived and
+		/// the fetch in flight while it has not, so that callers arriving
+		/// together share one request rather than each making their own.
 		/// </summary>
 		private static readonly ConcurrentDictionary<
 			Uri,
-			WeakReference<string>> _publicKeyCache = 
+			PublicKeyCacheEntry> _publicKeyCache =
 			new ConcurrentDictionary<
-				Uri, 
-				WeakReference<string>>();
+				Uri,
+				PublicKeyCacheEntry>();
 
 		/// <summary>
-		/// Verify that <see cref="Owid"/> signature is correct.
+		/// Verify that <see cref="Owid"/> signature is correct, fetching the
+		/// public key from the creator's domain over HTTPS.
 		/// </summary>
 		/// <param name="owid"></param>
+		/// <param name="cancellationToken">
+		/// Ends this caller's wait for the key. See
+		/// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
+		/// that does and does not cancel.
+		/// </param>
 		/// <returns></returns>
-		public static async Task<bool> VerifyAsync(this Model.Owid owid)
+		public static Task<bool> VerifyAsync(
+			this Model.Owid owid,
+			CancellationToken cancellationToken = default)
 		{
-			using (var crypto = owid.GetPublicKey("https"))
-			{
-				return await owid.VerifyAsync(crypto, Constants.Empty);
-			}
+			return owid.VerifyAsync(Constants.Empty, cancellationToken);
 		}
 
         /// <summary>
@@ -89,18 +98,28 @@ namespace Owid.Client
 		}
 
         /// <summary>
-        /// Verify that <see cref="Owid"/> signature is correct.
+        /// Verify that <see cref="Owid"/> signature is correct over the
+        /// others it was signed with, fetching the public key from the
+        /// creator's domain over HTTPS.
         /// </summary>
         /// <param name="owid"></param>
         /// <param name="others"></param>
+        /// <param name="cancellationToken">
+        /// Ends this caller's wait for the key. See
+        /// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
+        /// that does and does not cancel.
+        /// </param>
         /// <returns></returns>
         public static async Task<bool> VerifyAsync(
 			this Model.Owid owid,
-			params Model.Owid[] others)
+			Model.Owid[] others,
+			CancellationToken cancellationToken = default)
 		{
-			using (var crypto = owid.GetPublicKey("https"))
+			using (var crypto = await owid.GetPublicKeyAsync(
+				"https",
+				cancellationToken).ConfigureAwait(false))
 			{
-				return await owid.VerifyAsyncWithOthers(crypto, others);
+				return owid.Verify(crypto, others);
 			}
 		}
 
@@ -274,14 +293,16 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Gets the public key for the owid.
+		/// Gets the public key for the owid from the creator's domain.
 		/// </summary>
 		/// <param name="owid"></param>
 		/// <param name="scheme"></param>
+		/// <param name="cancellationToken"></param>
 		/// <returns></returns>
-		private static ECDsa GetPublicKey(
+		private static async Task<ECDsa> GetPublicKeyAsync(
 			this Model.Owid owid,
-			string scheme)
+			string scheme,
+			CancellationToken cancellationToken)
         {
             // Construct the URL to get the public key.
             UriBuilder u = new UriBuilder(
@@ -297,7 +318,9 @@ namespace Owid.Client
                 : "format=pkcs";
 
 			// Fetch the public key PEM associated with the OWID.
-			var publicKeyPem = GetPublicKey(u.Uri);
+			var publicKeyPem = await GetPublicKeyAsync(
+				u.Uri,
+				cancellationToken).ConfigureAwait(false);
 
 			// Reject an empty or whitespace PEM with a clear message rather
 			// than relying on the opaque exception thrown by ImportFromPem.
@@ -314,29 +337,98 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Get the public key from the domain contained in the OWID if it is 
-		/// not already contained in the cache.
+		/// Get the public key PEM from the URL if it is not already in the
+		/// cache. Callers arriving while a fetch for the same URL is in
+		/// flight share that fetch rather than starting their own.
 		/// </summary>
+		/// <remarks>
+		/// The token ends this caller's wait, not the shared request. A
+		/// request one caller started is usually the request every other
+		/// caller for the same key is waiting on, so letting one caller
+		/// abandon the request for all of them would turn one timeout into
+		/// many. The request runs to completion and the next caller finds
+		/// the key in the cache.
+		/// </remarks>
 		/// <param name="u"></param>
+		/// <param name="cancellationToken"></param>
 		/// <returns></returns>
         // Internal rather than private so the test project can point it
         // at a stand in end point by URL, since the domain an OWID carries
         // cannot name a port.
-        internal static string GetPublicKey(Uri u)
+        internal static Task<string> GetPublicKeyAsync(
+			Uri u,
+			CancellationToken cancellationToken = default)
         {
-			var publicKeyRef = _publicKeyCache.GetOrAdd(
+			var entry = _publicKeyCache.GetOrAdd(
 				u,
-				(u) =>
-				{
-					return new WeakReference<string>(new HttpClient(
-						_handler).GetStringAsync(u).Result);
-				});
-            if (publicKeyRef.TryGetTarget(out var publicKey) == false)
-            {
-				publicKey = new HttpClient(_handler).GetStringAsync(u).Result;
-				publicKeyRef.SetTarget(publicKey);
-			}
-			return publicKey;
+				static (u) => new PublicKeyCacheEntry());
+			return entry.GetAsync(u).WaitAsync(cancellationToken);
         }
+
+		/// <summary>
+		/// The cache's view of one key URL. The PEM is held weakly so that
+		/// memory pressure can reclaim it and a later caller fetches again,
+		/// which is the behaviour the cache has always had. The fetch in
+		/// flight is held strongly for as long as it is in flight, so that
+		/// concurrent callers share it. A fetch that fails is never kept,
+		/// so the next caller tries again rather than being handed the old
+		/// failure.
+		/// </summary>
+		private sealed class PublicKeyCacheEntry
+		{
+			private readonly object _sync = new object();
+			private WeakReference<string>? _publicKey;
+			private Task<string>? _fetch;
+
+			public Task<string> GetAsync(Uri u)
+			{
+				lock (_sync)
+				{
+					if (_publicKey != null &&
+						_publicKey.TryGetTarget(out var publicKey))
+					{
+						return Task.FromResult(publicKey);
+					}
+					if (_fetch != null)
+					{
+						return _fetch;
+					}
+					var fetch = FetchAsync(u);
+					// A fetch that has already finished has either stored
+					// the key in this entry or failed, and neither is worth
+					// keeping.
+					if (fetch.IsCompleted == false)
+					{
+						_fetch = fetch;
+					}
+					return fetch;
+				}
+			}
+
+			private async Task<string> FetchAsync(Uri u)
+			{
+				try
+				{
+					var publicKey = await new HttpClient(_handler)
+						.GetStringAsync(u)
+						.ConfigureAwait(false);
+					lock (_sync)
+					{
+						_publicKey = new WeakReference<string>(publicKey);
+					}
+					return publicKey;
+				}
+				finally
+				{
+					// Whether the fetch succeeded or failed, it is no longer
+					// in flight. Only one fetch is ever in flight for an
+					// entry, so the one being cleared is this one.
+					lock (_sync)
+					{
+						_fetch = null;
+					}
+				}
+			}
+		}
     }
 }

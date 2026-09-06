@@ -229,14 +229,23 @@
         </member>
         <member name="F:Owid.Client.CryptoExtensions._publicKeyCache">
             <summary>
-            Cache used to avoid repeat requests for the same public keys.
+            Cache used to avoid repeat requests for the same public keys. One
+            entry per key URL, holding the PEM weakly once it has arrived and
+            the fetch in flight while it has not, so that callers arriving
+            together share one request rather than each making their own.
             </summary>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid)">
+        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
             <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
+            Verify that <see cref="N:Owid"/> signature is correct, fetching the
+            public key from the creator's domain over HTTPS.
             </summary>
             <param name="owid"></param>
+            <param name="cancellationToken">
+            Ends this caller's wait for the key. See
+            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
+            that does and does not cancel.
+            </param>
             <returns></returns>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa)">
@@ -247,12 +256,19 @@
             <param name="crypto"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
             <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
+            Verify that <see cref="N:Owid"/> signature is correct over the
+            others it was signed with, fetching the public key from the
+            creator's domain over HTTPS.
             </summary>
             <param name="owid"></param>
             <param name="others"></param>
+            <param name="cancellationToken">
+            Ends this caller's wait for the key. See
+            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
+            that does and does not cancel.
+            </param>
             <returns></returns>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
@@ -315,21 +331,43 @@
             <param name="others"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.GetPublicKey(Owid.Client.Model.Owid,System.String)">
+        <member name="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(Owid.Client.Model.Owid,System.String,System.Threading.CancellationToken)">
             <summary>
-            Gets the public key for the owid.
+            Gets the public key for the owid from the creator's domain.
             </summary>
             <param name="owid"></param>
             <param name="scheme"></param>
+            <param name="cancellationToken"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.GetPublicKey(System.Uri)">
+        <member name="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)">
             <summary>
-            Get the public key from the domain contained in the OWID if it is 
-            not already contained in the cache.
+            Get the public key PEM from the URL if it is not already in the
+            cache. Callers arriving while a fetch for the same URL is in
+            flight share that fetch rather than starting their own.
             </summary>
+            <remarks>
+            The token ends this caller's wait, not the shared request. A
+            request one caller started is usually the request every other
+            caller for the same key is waiting on, so letting one caller
+            abandon the request for all of them would turn one timeout into
+            many. The request runs to completion and the next caller finds
+            the key in the cache.
+            </remarks>
             <param name="u"></param>
+            <param name="cancellationToken"></param>
             <returns></returns>
+        </member>
+        <member name="T:Owid.Client.CryptoExtensions.PublicKeyCacheEntry">
+            <summary>
+            The cache's view of one key URL. The PEM is held weakly so that
+            memory pressure can reclaim it and a later caller fetches again,
+            which is the behaviour the cache has always had. The fetch in
+            flight is held strongly for as long as it is in flight, so that
+            concurrent callers share it. A fetch that fails is never kept,
+            so the next caller tries again rather than being handed the old
+            failure.
+            </summary>
         </member>
         <member name="T:Owid.Client.Extensions">
             <summary>

@@ -39,7 +39,17 @@ namespace Owid.Client
 			new HttpClientHandler()
 			{
 				AutomaticDecompression =
-					DecompressionMethods.GZip | DecompressionMethods.Deflate
+					DecompressionMethods.GZip | DecompressionMethods.Deflate,
+				// Never follow a redirect. The handler follows up to fifty
+				// by default, to any other host, so a creator whose domain
+				// answered 302 to some other place would have that other
+				// place's key trusted as its own, and a network attacker
+				// able to bend the creator's DNS, or a creator that was
+				// simply misconfigured, could put a key there and have
+				// forgeries verify. Left alone, the 3xx is a non success
+				// code and GetStringAsync throws, which is how every other
+				// failure to obtain the key already surfaces here.
+				AllowAutoRedirect = false
 			};
 
 		/// <summary>
@@ -309,7 +319,10 @@ namespace Owid.Client
 		/// </summary>
 		/// <param name="u"></param>
 		/// <returns></returns>
-        private static string GetPublicKey(Uri u)
+        // Internal rather than private so the test project can point it
+        // at a stand in end point by URL, since the domain an OWID carries
+        // cannot name a port.
+        internal static string GetPublicKey(Uri u)
         {
 			var publicKeyRef = _publicKeyCache.GetOrAdd(
 				u,

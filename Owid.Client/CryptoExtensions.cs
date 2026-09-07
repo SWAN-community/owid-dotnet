@@ -63,6 +63,25 @@ namespace Owid.Client
 		private const int MaximumCachedKeys = 1024;
 
 		/// <summary>
+		/// How far a creator's clock may run ahead of or behind this one's,
+		/// in minutes. A minute closer to now than this, or later, is asked
+		/// about rather than served from the cache, and is not held.
+		/// </summary>
+		/// <remarks>
+		/// A creator reads a date later than its own now as now, and answers
+		/// with the key in force now. Within this window this process cannot
+		/// tell whether the creator read the minute as its past or as its
+		/// present, so the answer says nothing certain about the minute. An
+		/// identifier signed just after a rotation by a creator whose clock
+		/// runs ahead would otherwise be served the old key from a span
+		/// confirmed up to now, and would read as not matching until this
+		/// clock caught up. Identifiers dated within the window are asked
+		/// about once per minute per creator, as they always were, and every
+		/// older identifier is served from the spans.
+		/// </remarks>
+		private const uint ClockDriftAllowanceMinutes = 15;
+
+		/// <summary>
 		/// One key a creator has answered with, and the span of minutes the
 		/// creator has confirmed it was in force for.
 		/// </summary>
@@ -463,7 +482,9 @@ namespace Owid.Client
 			TaskCompletionSource<string>? source = null;
 			lock (_cacheLock)
 			{
-				var pem = HeldPem(endPoint, minute);
+				var pem = minute.HasValue
+					? HeldPem(endPoint, minute.Value)
+					: null;
 				if (pem != null)
 				{
 					return Task.FromResult(pem);
@@ -502,7 +523,7 @@ namespace Owid.Client
 		private static async Task FetchIntoAsync(
 			Uri u,
 			string endPoint,
-			uint minute,
+			uint? minute,
 			TaskCompletionSource<string> source)
 		{
 			try
@@ -517,7 +538,10 @@ namespace Owid.Client
 					.ConfigureAwait(false);
 				lock (_cacheLock)
 				{
-					Hold(endPoint, minute, publicKey);
+					if (minute.HasValue)
+					{
+						Hold(endPoint, minute.Value, publicKey);
+					}
 					Forget(u, source.Task);
 				}
 				source.SetResult(publicKey);
@@ -557,22 +581,18 @@ namespace Owid.Client
 		}
 
 		/// <summary>
-		/// The minute the cache reads the URL as asking about.
+		/// The minute the cache reads the URL as asking about, or null where
+		/// the cache must not be used for the request.
 		/// </summary>
 		/// <remarks>
-		/// The date parameter where the URL carries one, and otherwise now,
-		/// because a creator answers a request without a date with the key
-		/// in force now. A date later than now is read as now as well,
-		/// because that is how a creator reads it. A schedule is published
-		/// ahead of time and a key that has not started has signed nothing,
-		/// so the creator answers a future date with the key in force now,
-		/// and that answer must be held against now rather than against a
-		/// minute the creator has not spoken for. Held against the future
-		/// minute, the key would still be served for that minute after the
-		/// creator had rotated, and a genuine identifier signed then would
-		/// read as not matching.
+		/// The date parameter where the URL carries one and it is at least
+		/// <see cref="ClockDriftAllowanceMinutes"/> behind now. A request
+		/// without a date asks for the key in force now, and one dated
+		/// within the allowance, or later, may be read by the creator as its
+		/// present rather than as the minute named, so neither is served
+		/// from the cache nor held in it.
 		/// </remarks>
-		private static uint MinuteOf(Uri u)
+		private static uint? MinuteOf(Uri u)
 		{
 			var now = (uint)Math.Min(
 				(DateTime.UtcNow - Constants.BaseDate).TotalMinutes,
@@ -580,12 +600,14 @@ namespace Owid.Client
 			foreach (var pair in u.Query.TrimStart('?').Split('&'))
 			{
 				if (pair.StartsWith("date=", StringComparison.Ordinal)
-					&& uint.TryParse(pair.Substring(5), out var minute))
+					&& uint.TryParse(pair.Substring(5), out var minute)
+					&& now >= ClockDriftAllowanceMinutes
+					&& minute <= now - ClockDriftAllowanceMinutes)
 				{
-					return Math.Min(minute, now);
+					return minute;
 				}
 			}
-			return now;
+			return null;
 		}
 
 		/// <summary>

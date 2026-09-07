@@ -521,14 +521,15 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// A date later than now is held against now, because a creator
-        /// answers a future date with the key in force now and a key held
-        /// against a minute the creator has not spoken for would be served
-        /// for that minute after the creator had rotated. Two future dates
-        /// therefore share one request, and so does a request with no date.
+        /// A minute within the clock drift allowance of now, or later, is
+        /// asked about every time and never held, because a creator whose
+        /// clock differs from this one's may have read it as its present
+        /// rather than as the minute named. A minute beyond the allowance is
+        /// held as usual. Live identifiers therefore cost one request per
+        /// minute per creator, as they always did, and older ones cost none.
         /// </summary>
         [TestMethod]
-        public async Task AFutureDateIsHeldAgainstNow()
+        public async Task AMinuteWithinTheDriftAllowanceIsNotHeld()
         {
             CryptoExtensions.ClearPublicKeyCache();
             var hits = 0;
@@ -543,19 +544,27 @@ namespace Owid.Client.Test
             try
             {
                 var started = Now();
+                var recent = started - 1;
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, recent));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, recent));
                 await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, started + Week));
-                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, started + 2 * Week));
                 await CryptoExtensions.GetPublicKeyAsync(
                     new Uri(prefix + "owid/api/v3/public-key?format=pkcs"));
+                var old = started - Allowance() - 1;
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, old));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, old));
                 if (Now() != started)
                 {
                     Assert.Inconclusive(
                         "the minute changed during the test, so the calls "
                         + "were not all about the same now");
                 }
-                Assert.AreEqual(1, hits,
-                    "two future dates and no date are all now, and now was "
-                    + "asked about once");
+                Assert.AreEqual(5, hits,
+                    "the recent minute was asked about twice, the future "
+                    + "minute and the request with no date once each, and "
+                    + "the old minute once with the second call held");
+                Assert.AreEqual(1, CryptoExtensions.CachedKeyCount,
+                    "only the old minute's key is held");
             }
             finally
             {
@@ -659,6 +668,19 @@ namespace Owid.Client.Test
                 BindingFlags.NonPublic | BindingFlags.Static);
             Assert.IsNotNull(field, "the cache states its own limit");
             return (int)field!.GetRawConstantValue()!;
+        }
+
+        /// <summary>
+        /// The clock drift allowance the library holds itself to, read from
+        /// the library so the test cannot drift from it.
+        /// </summary>
+        private static uint Allowance()
+        {
+            var field = typeof(CryptoExtensions).GetField(
+                "ClockDriftAllowanceMinutes",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(field, "the cache states its drift allowance");
+            return (uint)field!.GetRawConstantValue()!;
         }
 
         /// <summary>

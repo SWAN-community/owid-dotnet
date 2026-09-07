@@ -354,6 +354,30 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// Test a failure inside verification arrives on the returned task
+        /// rather than at the call site. Verification no longer runs on the
+        /// thread pool, so without this a caller that starts the work on one
+        /// line and guards the await on another never catches the failure.
+        /// </summary>
+        [TestMethod]
+        public void TestVerifyAsyncWithOthersFaultsTheTask()
+        {
+            var owid = CreateOwid();
+
+            // A disposed key makes the underlying verification throw.
+            var crypto = ECDsa.Create();
+            crypto.ImportFromPem(PublicPEM);
+            crypto.Dispose();
+
+            var task = owid.VerifyAsyncWithOthers(
+                crypto,
+                Array.Empty<Model.Owid>());
+
+            Assert.IsTrue(task.IsFaulted);
+            Assert.IsNotNull(task.Exception);
+        }
+
+        /// <summary>
         /// Test GetByteCount matches the serialized length exactly, so the
         /// presized serialization buffers can never be wrong silently.
         /// </summary>

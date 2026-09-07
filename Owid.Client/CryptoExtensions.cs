@@ -235,7 +235,18 @@ namespace Owid.Client
 			// thread and a hop for a sub-millisecond CPU-bound operation,
 			// and callers that block on the result then held two threads
 			// per verification.
-			return Task.FromResult(owid.Verify(crypto, others));
+			try
+			{
+				return Task.FromResult(owid.Verify(crypto, others));
+			}
+			catch (Exception exception)
+			{
+				// Running on the caller's thread would otherwise raise the
+				// failure before the task exists, so a caller that starts the
+				// verification on one line and guards the await on another
+				// would never catch it.
+				return Task.FromException<bool>(exception);
+			}
 		}
 
 		/// <summary>

@@ -68,16 +68,17 @@ namespace Owid.Client
 		/// in minutes.
 		/// </summary>
 		/// <remarks>
-		/// It is used in two places. A creator that does not state the span
-		/// of the key it answers with reads a date later than its own now as
-		/// now, so within this window of now this process cannot tell
-		/// whether the creator read the minute as its past or as its
-		/// present, and nothing learned from such an answer is held or
-		/// served. And a creator's signing machines may not agree with the
-		/// creator's own schedule to the minute, so an identifier dated
-		/// within this window of a key's edge that does not verify under
-		/// that key is checked against the neighbouring key before it is
-		/// reported as not matching.
+		/// It is used in two places. A creator that does not state the end
+		/// of the span of the key it answers with reads a date later than
+		/// its own now as now, so within this window of now this process
+		/// cannot tell whether the creator read the minute as its past or
+		/// as its present, and nothing learned from such an answer is held
+		/// or served. And a creator's signing machines may not agree with
+		/// the creator's own schedule to the minute, so an identifier dated
+		/// within this window of an edge of the span the creator stated for
+		/// a key that does not verify under that key is checked against the
+		/// key for the minute just beyond that edge before it is reported as
+		/// not matching.
 		/// </remarks>
 		private const uint ClockDriftAllowanceMinutes = 15;
 
@@ -96,12 +97,13 @@ namespace Owid.Client
 		/// </remarks>
 		private sealed class HeldKey
 		{
-			public HeldKey(string pem, uint first, uint last, bool explicitSpan)
+			public HeldKey(string pem, uint first, uint last, bool explicitSpan, bool openEnded)
 			{
 				Pem = pem;
 				First = first;
 				Last = last;
 				Explicit = explicitSpan;
+				OpenEnded = openEnded;
 			}
 
 			/// <summary>
@@ -125,6 +127,13 @@ namespace Owid.Client
 			public bool Explicit { get; set; }
 
 			/// <summary>
+			/// Whether the creator stated the start of the span and no end,
+			/// so that as far as the creator has said the key is in force
+			/// until further notice, whatever this cache holds it for.
+			/// </summary>
+			public bool OpenEnded { get; set; }
+
+			/// <summary>
 			/// Whether the minute lies within the known span.
 			/// </summary>
 			public bool Covers(uint minute)
@@ -135,9 +144,10 @@ namespace Owid.Client
 
 		/// <summary>
 		/// What the cache or a fetch answers with. The key, and where it is
-		/// known, the span of minutes the key covers, so that a caller can
-		/// tell whether the identifier it is checking sits near the edge of
-		/// the span.
+		/// stated one, the span of minutes the creator says the key covers,
+		/// so that a caller can tell whether the identifier it is checking
+		/// sits near an edge of the span, or outside it altogether. A span
+		/// stated with a start and no end runs to the last minute there is.
 		/// </summary>
 		internal readonly struct KeyAnswer
 		{
@@ -152,16 +162,16 @@ namespace Owid.Client
 			/// <summary>The key in PEM form.</summary>
 			public string Pem { get; }
 
-			/// <summary>The earliest minute the key is known to cover.</summary>
+			/// <summary>The first minute the creator says the key covers.</summary>
 			public uint First { get; }
 
-			/// <summary>The latest minute the key is known to cover.</summary>
+			/// <summary>The last minute the creator says the key covers.</summary>
 			public uint Last { get; }
 
-			/// <summary>Whether the span says anything.</summary>
+			/// <summary>Whether the creator stated a span at all.</summary>
 			public bool Known { get; }
 
-			/// <summary>Whether the minute lies within the known span.</summary>
+			/// <summary>Whether the minute lies within the stated span.</summary>
 			public bool Covers(uint minute)
 			{
 				return Known && First <= minute && minute <= Last;
@@ -501,35 +511,135 @@ namespace Owid.Client
 		}
 
 		/// <summary>
+		/// Says whether the signature is genuine using the key the creator's
+		/// domain serves for the OWID's own date, or why that could not be
+		/// decided.
+		/// </summary>
+		/// <remarks>
+		/// A creator that cannot be reached, or that answers with something
+		/// other than a key, or whose own statement of the span puts the
+		/// OWID's date outside the key it answered with, leaves the
+		/// signature unjudged and is reported as such rather than as a
+		/// forgery. See <see cref="SignatureStatus(Model.Owid, ECDsa, Model.Owid[])"/>
+		/// for the answers about the signature itself.
+		/// </remarks>
+		/// <param name="owid"></param>
+		/// <param name="others"></param>
+		/// <param name="cancellationToken">
+		/// Ends this caller's wait for the key. See
+		/// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
+		/// that does and does not cancel.
+		/// </param>
+		public static async Task<OwidSignatureStatus> SignatureStatusAsync(
+			this Model.Owid owid,
+			Model.Owid[] others,
+			CancellationToken cancellationToken = default)
+		{
+			try
+			{
+				return await owid.SignatureStatusAtAsync(
+					KeyEndPointFor(owid, "https"),
+					others,
+					cancellationToken).ConfigureAwait(false);
+			}
+			catch (HttpRequestException)
+			{
+				return OwidSignatureStatus.KeyUnavailable;
+			}
+			catch (Exception e) when (
+				e is ArgumentException ||
+				e is CryptographicException ||
+				e is FormatException)
+			{
+				return OwidSignatureStatus.InvalidKey;
+			}
+		}
+
+		/// <summary>
+		/// Says whether the signature is genuine using the key the creator's
+		/// domain serves for the OWID's own date, or why that could not be
+		/// decided. See
+		/// <see cref="SignatureStatusAsync(Model.Owid, Model.Owid[], CancellationToken)"/>.
+		/// </summary>
+		public static Task<OwidSignatureStatus> SignatureStatusAsync(
+			this Model.Owid owid,
+			CancellationToken cancellationToken = default)
+		{
+			return owid.SignatureStatusAsync(Constants.Empty, cancellationToken);
+		}
+
+		/// <summary>
 		/// Verify the OWID against the key its creator's end point serves
 		/// for the OWID's own date, trying the neighbouring key where the
-		/// signature fails within the clock drift allowance of the edge of
-		/// the key's span.
+		/// signature fails within the clock drift allowance of an edge of
+		/// the span the creator stated for the key.
 		/// </summary>
 		/// <remarks>
 		/// Internal rather than private so the test project can point it at
 		/// a stand in end point by URL, since the domain an OWID carries
 		/// cannot name a port.
 		/// </remarks>
+		/// <exception cref="InvalidOperationException">
+		/// The creator's own statement of the span puts the OWID's date
+		/// outside the key it answered with, so the signature could not be
+		/// checked and false would have read as a forgery.
+		/// </exception>
 		internal static async Task<bool> VerifyAtAsync(
 			this Model.Owid owid,
 			string endPoint,
 			Model.Owid[] others,
 			CancellationToken cancellationToken)
 		{
+			var status = await owid.SignatureStatusAtAsync(
+				endPoint, others, cancellationToken).ConfigureAwait(false);
+			if (status == OwidSignatureStatus.KeyUnavailable)
+			{
+				throw new InvalidOperationException(
+					"the creator states that the key it answered with was not in force at the OWID's date, so the signature could not be checked");
+			}
+			return status == OwidSignatureStatus.SignatureValid;
+		}
+
+		/// <summary>
+		/// The status of the signature under the key the end point serves
+		/// for the OWID's own date, or under the neighbouring key where the
+		/// date is within the clock drift allowance of an edge of the span
+		/// the creator stated. A key the creator says was not in force at
+		/// the OWID's date proves nothing about the identifier, so where
+		/// nothing verifies under such a key the answer is that the key is
+		/// unavailable and not that the signature does not match.
+		/// </summary>
+		internal static async Task<OwidSignatureStatus> SignatureStatusAtAsync(
+			this Model.Owid owid,
+			string endPoint,
+			Model.Owid[] others,
+			CancellationToken cancellationToken)
+		{
+			var minute = MinuteOf(owid);
 			var answer = await GetKeyAsync(
-				KeyUriFor(endPoint, MinuteOf(owid)),
+				KeyUriFor(endPoint, minute),
 				cancellationToken).ConfigureAwait(false);
 			using (var crypto = ImportKey(answer.Pem))
 			{
-				if (owid.Verify(crypto, others))
+				var status = owid.SignatureStatus(crypto, others);
+				if (status != OwidSignatureStatus.SignatureInvalid)
 				{
-					return true;
+					return status;
 				}
 			}
-			return await NeighbourVerifiesAsync(
-				owid, endPoint, answer, others, cancellationToken)
-				.ConfigureAwait(false);
+			if (minute == null)
+			{
+				return OwidSignatureStatus.SignatureInvalid;
+			}
+			if (await NeighbourVerifiesAsync(
+				owid, minute.Value, endPoint, answer, others, cancellationToken)
+				.ConfigureAwait(false))
+			{
+				return OwidSignatureStatus.SignatureValid;
+			}
+			return answer.Known && answer.Covers(minute.Value) == false
+				? OwidSignatureStatus.KeyUnavailable
+				: OwidSignatureStatus.SignatureInvalid;
 		}
 
 		/// <summary>
@@ -542,51 +652,43 @@ namespace Owid.Client
 		/// may have been signed with the key before it, and one dated just
 		/// before may have been signed with the key after. Where the
 		/// signature does not verify under the key selected and the OWID's
-		/// minute is within the clock drift allowance of the edge of the
-		/// span that key is known to cover, the key for the minute just
-		/// beyond that edge is asked for and tried. A key already known to
-		/// cover the neighbouring minute is not asked for again, and a
-		/// neighbour that turns out to be the same key is not tried again.
-		/// This costs at most two more requests, and only for a signature
-		/// that has already failed.
+		/// minute is within the clock drift allowance of an edge of the span
+		/// the creator stated for that key, the key for the minute just
+		/// beyond that edge is asked for and tried. A key already held for
+		/// that minute is not asked for again, and a neighbour that turns
+		/// out to be the same key is not tried again. A creator that stated
+		/// no span has one key and no schedule, so there is no neighbour to
+		/// try. This costs at most two more requests, and only for a
+		/// signature that has already failed.
 		/// </remarks>
 		private static async Task<bool> NeighbourVerifiesAsync(
 			Model.Owid owid,
+			uint minute,
 			string endPoint,
 			KeyAnswer tried,
 			Model.Owid[] others,
 			CancellationToken cancellationToken)
 		{
-			var minute = MinuteOf(owid);
-			if (minute == null)
+			if (tried.Known == false)
 			{
 				return false;
 			}
-			if (tried.Known && tried.Covers(minute.Value) == false)
+			var beyond = new List<uint>(2);
+			if (tried.First > 0 && NearEdge(minute, tried.First))
 			{
-				// The key tried was never in force at the OWID's minute, so
-				// the OWID is not near an edge of that key's span. This is a
-				// request without a date answered with the current key, or a
-				// creator whose answer did not cover the minute asked about,
-				// and the neighbours of the minute have nothing to do with
-				// the key tried.
-				return false;
+				beyond.Add(tried.First - 1);
 			}
-			foreach (var at in new long[]
+			if (tried.Last < uint.MaxValue && NearEdge(minute, tried.Last))
 			{
-				(long)minute.Value - ClockDriftAllowanceMinutes,
-				(long)minute.Value + ClockDriftAllowanceMinutes,
-			})
+				beyond.Add(tried.Last + 1);
+			}
+			foreach (var at in beyond)
 			{
-				if (at < 0 || at > uint.MaxValue || tried.Covers((uint)at))
-				{
-					continue;
-				}
 				KeyAnswer neighbour;
 				try
 				{
 					neighbour = await GetKeyAsync(
-						KeyUriFor(endPoint, (uint)at),
+						KeyUriFor(endPoint, at),
 						cancellationToken).ConfigureAwait(false);
 				}
 				catch (Exception e) when (e is not OperationCanceledException)
@@ -608,6 +710,17 @@ namespace Owid.Client
 				}
 			}
 			return false;
+		}
+
+		/// <summary>
+		/// Whether the minute is no further from the edge minute than the
+		/// clocks of a creator's signing machines are allowed to differ
+		/// from its schedule.
+		/// </summary>
+		private static bool NearEdge(uint minute, uint edge)
+		{
+			var apart = minute > edge ? minute - edge : edge - minute;
+			return apart <= ClockDriftAllowanceMinutes;
 		}
 
 		/// <summary>
@@ -855,7 +968,7 @@ namespace Owid.Client
 				{
 					if (key.Covers(minute) && (key.Explicit || recent == false))
 					{
-						return new KeyAnswer(key.Pem, key.First, key.Last, true);
+						return StatedFor(key);
 					}
 				}
 			}
@@ -863,10 +976,46 @@ namespace Owid.Client
 		}
 
 		/// <summary>
+		/// The span the creator stated for a held key, which is the whole
+		/// held span where the creator stated it, runs to the last minute
+		/// there is where the creator stated a start and no end, and is
+		/// nothing where the creator stated no span.
+		/// </summary>
+		private static KeyAnswer StatedFor(HeldKey key)
+		{
+			if (key.Explicit)
+			{
+				return new KeyAnswer(key.Pem, key.First, key.Last, true);
+			}
+			if (key.OpenEnded)
+			{
+				return new KeyAnswer(key.Pem, key.First, uint.MaxValue, true);
+			}
+			return new KeyAnswer(key.Pem, 0, 0, false);
+		}
+
+		/// <summary>
+		/// The span the creator stated in its answer. See
+		/// <see cref="StatedFor(HeldKey)"/>.
+		/// </summary>
+		private static KeyAnswer Stated(string pem, uint? start, uint? end)
+		{
+			if (start == null)
+			{
+				return new KeyAnswer(pem, 0, 0, false);
+			}
+			if (end != null && end.Value > start.Value)
+			{
+				return new KeyAnswer(pem, start.Value, end.Value - 1, true);
+			}
+			return new KeyAnswer(pem, start.Value, uint.MaxValue, true);
+		}
+
+		/// <summary>
 		/// Records the creator's answer to the URL, being the key and, where
 		/// the creator stated it, the span the key covers as the minute it
 		/// came into force and the minute the next key starts. Returns the
-		/// key with the span it is now known to cover. Called under the
+		/// key with the span the creator stated for it. Called under the
 		/// lock.
 		/// </summary>
 		/// <remarks>
@@ -887,10 +1036,12 @@ namespace Owid.Client
 			uint? start,
 			uint? end)
 		{
+			var stated = Stated(pem, start, end);
 			var dated = TryMinuteOf(u, out var minute, out var recent);
 			uint first;
 			uint last;
 			var explicitSpan = false;
+			var openEnded = false;
 			if (start != null && end != null && end.Value > start.Value)
 			{
 				first = start.Value;
@@ -907,6 +1058,7 @@ namespace Owid.Client
 					&& now - ClockDriftAllowanceMinutes > first
 					? now - ClockDriftAllowanceMinutes
 					: first;
+				openEnded = true;
 			}
 			else if (dated && recent == false)
 			{
@@ -915,7 +1067,7 @@ namespace Owid.Client
 			}
 			else
 			{
-				return new KeyAnswer(pem, 0, 0, false);
+				return stated;
 			}
 			_publicKeyCache.TryGetValue(endPoint, out var keys);
 			if (keys != null)
@@ -927,20 +1079,21 @@ namespace Owid.Client
 						if (Widen(keys, key, first, last))
 						{
 							key.Explicit = key.Explicit || explicitSpan;
-							return new KeyAnswer(pem, key.First, key.Last, true);
+							key.OpenEnded = key.Explicit == false
+								&& (key.OpenEnded || openEnded);
 						}
-						// The creator has answered with another key inside
-						// this span before, which it does not do unless it
-						// went back to a key it had left. Nothing more is
-						// held about this key.
-						return new KeyAnswer(pem, 0, 0, false);
+						// Where the span was not widened the creator has
+						// answered with another key inside it before, which
+						// it does not do unless it went back to a key it had
+						// left, and nothing more is held about this key.
+						return stated;
 					}
 				}
 				foreach (var other in keys)
 				{
 					if (other.Last >= first && other.First <= last)
 					{
-						return new KeyAnswer(pem, 0, 0, false);
+						return stated;
 					}
 				}
 			}
@@ -955,9 +1108,9 @@ namespace Owid.Client
 				keys = new List<HeldKey>();
 				_publicKeyCache[endPoint] = keys;
 			}
-			keys.Add(new HeldKey(pem, first, last, explicitSpan));
+			keys.Add(new HeldKey(pem, first, last, explicitSpan, openEnded));
 			_heldKeys++;
-			return new KeyAnswer(pem, first, last, true);
+			return stated;
 		}
 
 		/// <summary>

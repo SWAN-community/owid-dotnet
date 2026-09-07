@@ -110,10 +110,11 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestGetCreatorWithDateUsesStore()
         {
+            var oldKey = FreshPem();
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = oldKey },
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = FreshPem() },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -122,7 +123,27 @@ namespace Owid.Client.Test
                     new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
                 var creator = (await controller.GetCreator(minutes)).Value;
-                Assert.AreEqual("old", creator!.PublicKeySPKI);
+                Assert.AreEqual(oldKey, creator!.PublicKeySPKI);
+            }
+        }
+
+        /// <summary>
+        /// The creator end point applies the checks the public-key end point
+        /// applies, so a store holding something a client would refuse as a
+        /// key is a server error on both.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetCreatorRefusesAKeyAClientWouldRefuse()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "not a key" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var result = (await controller.GetCreator()).Result as ObjectResult;
+                Assert.IsNotNull(result, "a key that cannot be read is answered with a status");
+                Assert.AreEqual(StatusCodes.Status500InternalServerError, result!.StatusCode);
             }
         }
 

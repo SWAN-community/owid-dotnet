@@ -798,7 +798,172 @@ namespace Owid.Client.Test
                 Assert.IsFalse(
                     await far.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
                     "an identifier well inside the later key's span signed with the earlier key does not verify");
-                Assert.AreEqual(2, hits, "the neighbouring minutes lie inside the spans already held");
+                Assert.AreEqual(2, hits, "the identifier is further from every edge than clocks may differ");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// The neighbouring key is asked for by the minute just beyond the
+        /// edge of the span the creator stated, not by a minute a fixed
+        /// distance from the identifier, so a key in force for less than the
+        /// drift allowance is still the one tried.
+        /// </summary>
+        [TestMethod]
+        public async Task TheNeighbourIsAskedForByTheMinuteJustBeyondTheEdge()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            using var firstKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            using var secondKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var firstPem = new string(System.Security.Cryptography.PemEncoding.Write(
+                "PUBLIC KEY", firstKey.ExportSubjectPublicKeyInfo()));
+            var secondPem = new string(System.Security.Cryptography.PemEncoding.Write(
+                "PUBLIC KEY", secondKey.ExportSubjectPublicKeyInfo()));
+            var start = Minute - 2 * Week;
+            var rotation = Minute - Week;
+            var end = Minute;
+            var asked = new System.Collections.Concurrent.ConcurrentQueue<uint?>();
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = ServeJson(creator, stop.Token,
+                date =>
+                {
+                    asked.Enqueue(date);
+                    return date!.Value < rotation
+                        ? Answer(firstPem, start, rotation)
+                        : Answer(secondPem, rotation, end);
+                },
+                () => { });
+
+            try
+            {
+                var endPoint = prefix + "owid/api/v3/public-key";
+                var payload = Encoding.UTF8.GetBytes("payload");
+                var late = new Creator("creator.test", firstKey)
+                    .Create(payload, BaseDate.AddMinutes(rotation + 5));
+                Assert.IsTrue(
+                    await late.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default));
+                CollectionAssert.AreEqual(
+                    new uint?[] { rotation + 5, rotation - 1 },
+                    asked.ToArray(),
+                    "the identifier's own minute and then the minute just before the span started");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// A key the creator states a start for and no end is in force until
+        /// further notice as far as the creator has said, so a live
+        /// identifier dated just after that start which does not verify
+        /// under it is checked against the key before it, even though the
+        /// cache holds the key only up to the drift allowance behind now.
+        /// </summary>
+        [TestMethod]
+        public async Task AKeyStatedWithoutAnEndHasNoLaterEdge()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            using var firstKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            using var secondKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var firstPem = new string(System.Security.Cryptography.PemEncoding.Write(
+                "PUBLIC KEY", firstKey.ExportSubjectPublicKeyInfo()));
+            var secondPem = new string(System.Security.Cryptography.PemEncoding.Write(
+                "PUBLIC KEY", secondKey.ExportSubjectPublicKeyInfo()));
+            var rotation = Now() - 5;
+            var start = rotation - Week;
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = ServeJson(creator, stop.Token,
+                date => date!.Value < rotation
+                    ? Answer(firstPem, start, rotation)
+                    : Answer(secondPem, rotation, null),
+                () => Interlocked.Increment(ref hits));
+
+            try
+            {
+                var endPoint = prefix + "owid/api/v3/public-key";
+                var payload = Encoding.UTF8.GetBytes("payload");
+                var live = new Creator("creator.test", firstKey)
+                    .Create(payload, BaseDate.AddMinutes(rotation + 2));
+                Assert.IsTrue(
+                    await live.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    "a live identifier signed with the key before the current one verifies");
+                Assert.AreEqual(2, hits, "the current key and then the key before it were asked for");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// A creator whose own statement puts the identifier's date outside
+        /// the span of the key it answered with has said that key did not
+        /// sign at that date, so nothing verifying under it leaves the key
+        /// unavailable rather than the signature not matching. A forgery
+        /// dated inside the span is still reported as not matching.
+        /// </summary>
+        [TestMethod]
+        public async Task AKeyTheCreatorSaysWasNotInForceLeavesTheSignatureUnjudged()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            using var firstKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            using var secondKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            using var strangerKey = System.Security.Cryptography.ECDsa.Create(
+                System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var secondPem = new string(System.Security.Cryptography.PemEncoding.Write(
+                "PUBLIC KEY", secondKey.ExportSubjectPublicKeyInfo()));
+            var rotation = Minute - Week;
+            var end = Minute;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            // A creator that ignores the date asked about and answers with
+            // the current key and its span whatever the request.
+            var serving = ServeJson(creator, stop.Token,
+                date => Answer(secondPem, rotation, end),
+                () => { });
+
+            try
+            {
+                var endPoint = prefix + "owid/api/v3/public-key";
+                var payload = Encoding.UTF8.GetBytes("payload");
+                var earlier = new Creator("creator.test", firstKey)
+                    .Create(payload, BaseDate.AddMinutes(rotation - 3 * 24 * 60));
+                Assert.AreEqual(
+                    Model.OwidSignatureStatus.KeyUnavailable,
+                    await earlier.SignatureStatusAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    "the key answered with was not in force at the identifier's date");
+                await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                    () => earlier.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    "the boolean form cannot say false without it reading as a forgery");
+
+                var forged = new Creator("creator.test", strangerKey)
+                    .Create(payload, BaseDate.AddMinutes(rotation + 3 * 24 * 60));
+                Assert.AreEqual(
+                    Model.OwidSignatureStatus.SignatureInvalid,
+                    await forged.SignatureStatusAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    "a signature failing under the key in force at its date does not match");
             }
             finally
             {

@@ -242,16 +242,17 @@
             in minutes.
             </summary>
             <remarks>
-            It is used in two places. A creator that does not state the span
-            of the key it answers with reads a date later than its own now as
-            now, so within this window of now this process cannot tell
-            whether the creator read the minute as its past or as its
-            present, and nothing learned from such an answer is held or
-            served. And a creator's signing machines may not agree with the
-            creator's own schedule to the minute, so an identifier dated
-            within this window of a key's edge that does not verify under
-            that key is checked against the neighbouring key before it is
-            reported as not matching.
+            It is used in two places. A creator that does not state the end
+            of the span of the key it answers with reads a date later than
+            its own now as now, so within this window of now this process
+            cannot tell whether the creator read the minute as its past or
+            as its present, and nothing learned from such an answer is held
+            or served. And a creator's signing machines may not agree with
+            the creator's own schedule to the minute, so an identifier dated
+            within this window of an edge of the span the creator stated for
+            a key that does not verify under that key is checked against the
+            key for the minute just beyond that edge before it is reported as
+            not matching.
             </remarks>
         </member>
         <member name="T:Owid.Client.CryptoExtensions.HeldKey">
@@ -289,6 +290,13 @@
             Whether the creator stated the whole span itself.
             </summary>
         </member>
+        <member name="P:Owid.Client.CryptoExtensions.HeldKey.OpenEnded">
+            <summary>
+            Whether the creator stated the start of the span and no end,
+            so that as far as the creator has said the key is in force
+            until further notice, whatever this cache holds it for.
+            </summary>
+        </member>
         <member name="M:Owid.Client.CryptoExtensions.HeldKey.Covers(System.UInt32)">
             <summary>
             Whether the minute lies within the known span.
@@ -297,25 +305,26 @@
         <member name="T:Owid.Client.CryptoExtensions.KeyAnswer">
             <summary>
             What the cache or a fetch answers with. The key, and where it is
-            known, the span of minutes the key covers, so that a caller can
-            tell whether the identifier it is checking sits near the edge of
-            the span.
+            stated one, the span of minutes the creator says the key covers,
+            so that a caller can tell whether the identifier it is checking
+            sits near an edge of the span, or outside it altogether. A span
+            stated with a start and no end runs to the last minute there is.
             </summary>
         </member>
         <member name="P:Owid.Client.CryptoExtensions.KeyAnswer.Pem">
             <summary>The key in PEM form.</summary>
         </member>
         <member name="P:Owid.Client.CryptoExtensions.KeyAnswer.First">
-            <summary>The earliest minute the key is known to cover.</summary>
+            <summary>The first minute the creator says the key covers.</summary>
         </member>
         <member name="P:Owid.Client.CryptoExtensions.KeyAnswer.Last">
-            <summary>The latest minute the key is known to cover.</summary>
+            <summary>The last minute the creator says the key covers.</summary>
         </member>
         <member name="P:Owid.Client.CryptoExtensions.KeyAnswer.Known">
-            <summary>Whether the span says anything.</summary>
+            <summary>Whether the creator stated a span at all.</summary>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.KeyAnswer.Covers(System.UInt32)">
-            <summary>Whether the minute lies within the known span.</summary>
+            <summary>Whether the minute lies within the stated span.</summary>
         </member>
         <member name="F:Owid.Client.CryptoExtensions._cacheLock">
             <summary>
@@ -482,20 +491,66 @@
             The ECDsa provider for the key in PEM form.
             </summary>
         </member>
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+            <summary>
+            Says whether the signature is genuine using the key the creator's
+            domain serves for the OWID's own date, or why that could not be
+            decided.
+            </summary>
+            <remarks>
+            A creator that cannot be reached, or that answers with something
+            other than a key, or whose own statement of the span puts the
+            OWID's date outside the key it answered with, leaves the
+            signature unjudged and is reported as such rather than as a
+            forgery. See <see cref="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])"/>
+            for the answers about the signature itself.
+            </remarks>
+            <param name="owid"></param>
+            <param name="others"></param>
+            <param name="cancellationToken">
+            Ends this caller's wait for the key. See
+            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
+            that does and does not cancel.
+            </param>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
+            <summary>
+            Says whether the signature is genuine using the key the creator's
+            domain serves for the OWID's own date, or why that could not be
+            decided. See
+            <see cref="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)"/>.
+            </summary>
+        </member>
         <member name="M:Owid.Client.CryptoExtensions.VerifyAtAsync(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
             <summary>
             Verify the OWID against the key its creator's end point serves
             for the OWID's own date, trying the neighbouring key where the
-            signature fails within the clock drift allowance of the edge of
-            the key's span.
+            signature fails within the clock drift allowance of an edge of
+            the span the creator stated for the key.
             </summary>
             <remarks>
             Internal rather than private so the test project can point it at
             a stand in end point by URL, since the domain an OWID carries
             cannot name a port.
             </remarks>
+            <exception cref="T:System.InvalidOperationException">
+            The creator's own statement of the span puts the OWID's date
+            outside the key it answered with, so the signature could not be
+            checked and false would have read as a forgery.
+            </exception>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.NeighbourVerifiesAsync(Owid.Client.Model.Owid,System.String,Owid.Client.CryptoExtensions.KeyAnswer,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAtAsync(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+            <summary>
+            The status of the signature under the key the end point serves
+            for the OWID's own date, or under the neighbouring key where the
+            date is within the clock drift allowance of an edge of the span
+            the creator stated. A key the creator says was not in force at
+            the OWID's date proves nothing about the identifier, so where
+            nothing verifies under such a key the answer is that the key is
+            unavailable and not that the signature does not match.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.NeighbourVerifiesAsync(Owid.Client.Model.Owid,System.UInt32,System.String,Owid.Client.CryptoExtensions.KeyAnswer,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
             <summary>
             Whether a key neighbouring the one the OWID's own minute selected
             verifies the signature instead.
@@ -506,14 +561,22 @@
             may have been signed with the key before it, and one dated just
             before may have been signed with the key after. Where the
             signature does not verify under the key selected and the OWID's
-            minute is within the clock drift allowance of the edge of the
-            span that key is known to cover, the key for the minute just
-            beyond that edge is asked for and tried. A key already known to
-            cover the neighbouring minute is not asked for again, and a
-            neighbour that turns out to be the same key is not tried again.
-            This costs at most two more requests, and only for a signature
-            that has already failed.
+            minute is within the clock drift allowance of an edge of the span
+            the creator stated for that key, the key for the minute just
+            beyond that edge is asked for and tried. A key already held for
+            that minute is not asked for again, and a neighbour that turns
+            out to be the same key is not tried again. A creator that stated
+            no span has one key and no schedule, so there is no neighbour to
+            try. This costs at most two more requests, and only for a
+            signature that has already failed.
             </remarks>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.NearEdge(System.UInt32,System.UInt32)">
+            <summary>
+            Whether the minute is no further from the edge minute than the
+            clocks of a creator's signing machines are allowed to differ
+            from its schedule.
+            </summary>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)">
             <summary>
@@ -609,12 +672,26 @@
             minute by minute says nothing certain about such a minute.
             </remarks>
         </member>
+        <member name="M:Owid.Client.CryptoExtensions.StatedFor(Owid.Client.CryptoExtensions.HeldKey)">
+            <summary>
+            The span the creator stated for a held key, which is the whole
+            held span where the creator stated it, runs to the last minute
+            there is where the creator stated a start and no end, and is
+            nothing where the creator stated no span.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.CryptoExtensions.Stated(System.String,System.Nullable{System.UInt32},System.Nullable{System.UInt32})">
+            <summary>
+            The span the creator stated in its answer. See
+            <see cref="M:Owid.Client.CryptoExtensions.StatedFor(Owid.Client.CryptoExtensions.HeldKey)"/>.
+            </summary>
+        </member>
         <member name="M:Owid.Client.CryptoExtensions.Hold(System.String,System.Uri,System.String,System.Nullable{System.UInt32},System.Nullable{System.UInt32})">
             <summary>
             Records the creator's answer to the URL, being the key and, where
             the creator stated it, the span the key covers as the minute it
             came into force and the minute the next key starts. Returns the
-            key with the span it is now known to cover. Called under the
+            key with the span the creator stated for it. Called under the
             lock.
             </summary>
             <remarks>

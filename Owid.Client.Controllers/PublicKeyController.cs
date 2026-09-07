@@ -153,23 +153,25 @@ namespace Owid.Client.Controllers
 
         /// <summary>
         /// Returns the creator domain and signing public key. With a date,
-        /// returns the key in force at that date; without one, the key in
+        /// returns the key in force at that date. Without one, the key in
         /// force now, and a date later than the moment of the request is read
-        /// as that moment. This matches the public-key end point so the two
-        /// agree.
+        /// as that moment. The key is checked the way the public-key end
+        /// point checks its answer before it is sent, so the two agree.
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
         /// encoding).
         /// </param>
         /// <returns>
-        /// The creator info, or 404 when no key was active at the requested
-        /// date.
+        /// The creator info, 404 when no key was active at the requested
+        /// date, or 500 when the store holds something a client would
+        /// refuse as a key.
         /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         [HttpGet("creator")]
         [HttpPost("creator")]
         public async Task<ActionResult<CreatorResponse>> GetCreator(
@@ -180,10 +182,20 @@ namespace Owid.Client.Controllers
             {
                 return denied;
             }
-            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
+            var asked = ClampToNow(date);
+            var period = _publicKeyStore.GetPublicKeyPeriod(asked);
+            var key = period?.PublicKey ?? _publicKeyStore.GetPublicKey(asked);
             if (key == null)
             {
                 return NotFound();
+            }
+            try
+            {
+                PublicKeyResponse.For(key, period, asked ?? NowMinutes());
+            }
+            catch (InvalidOperationException e)
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, e.Message);
             }
             return new CreatorResponse
             {

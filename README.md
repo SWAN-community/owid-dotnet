@@ -16,16 +16,15 @@ concepts behind this implementation.
 
 This repository contains a full .NET client for OWID. It can create, sign and
 verify OWIDs, and serialize them to and from byte arrays and Base64 strings.
-It also provides an ASP.NET Core controller which serves the public key and
-creator endpoints that other parties use when verifying OWIDs from your
-domain.
+It also provides an ASP.NET Core controller which serves the public key end
+point that other parties use when verifying OWIDs from your domain.
 
 The solution contains three projects.
 
 | Project | Purpose |
 |---|---|
 | `Owid.Client` | Core model, creation, signing, verification and serialization. |
-| `Owid.Client.Controllers` | ASP.NET Core controller for the public key and creator endpoints. |
+| `Owid.Client.Controllers` | ASP.NET Core controller for the public key end point. |
 | `Owid.Client.Test` | MSTest unit tests. |
 
 ## Payload size and application limits
@@ -259,7 +258,7 @@ using (var crypto = ECDsa.Create())
 }
 ```
 
-### Serve the public key and creator endpoints
+### Serve the public key end point
 
 Add a reference to `Owid.Client.Controllers` and register the configuration so
 that `OwidController` is available to the ASP.NET Core pipeline.
@@ -282,8 +281,8 @@ app.Run();
 ```
 
 The controller then responds to `/owid/api/v1/public-key`,
-`/owid/api/v2/public-key`, `/owid/api/v3/public-key` and the equivalent
-`creator` paths. Use the v3 paths for new integrations; v1 and v2 remain for
+`/owid/api/v2/public-key` and `/owid/api/v3/public-key`. Use the v3 path for
+new integrations. v1 and v2 remain for
 backwards compatibility.
 
 ### Historical keys (rotating signing keys)
@@ -337,9 +336,9 @@ than the last entry of a schedule written ahead of time.
 ### Requiring authentication (optional)
 
 The OWID specification leaves authentication to the implementor: a creator
-MAY require a credential on the public-key and creator endpoints, for
-example to tie key access to a subscription. Register an `IOwidAuthorizer`
-to enforce your own rule; without one the endpoints stay open. The check is
+MAY require a credential on the public-key end point, for example to tie key
+access to a subscription. Register an `IOwidAuthorizer` to enforce your own
+rule. Without one the end point stays open. The check is
 async so it can call a database or another service.
 
 ```csharp

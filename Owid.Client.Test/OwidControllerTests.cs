@@ -88,83 +88,6 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// Test that the creator endpoint returns the configured domain. The
-        /// current implementation returns the domain string only rather than
-        /// a JSON document.
-        /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorReturnsConfiguredDomain()
-        {
-            using (var controller = new OwidController(Configuration!))
-            {
-                var creator = (await controller.GetCreator()).Value;
-                Assert.AreEqual(Configuration!.Domain, creator!.Domain);
-                Assert.AreEqual(Configuration!.PublicKey, creator!.PublicKeySPKI);
-            }
-        }
-
-        /// <summary>
-        /// A supplied date selects the creator's key through the store, so the
-        /// creator and public-key endpoints agree.
-        /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorWithDateUsesStore()
-        {
-            var oldKey = FreshPem();
-            var store = new DatedKeyStore(new[]
-            {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = oldKey },
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = FreshPem() },
-            });
-            using (var controller = new OwidController(Configuration!, store))
-            {
-                var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                var minutes = (uint)(
-                    new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
-                    .TotalMinutes;
-                var creator = (await controller.GetCreator(minutes)).Value;
-                Assert.AreEqual(oldKey, creator!.PublicKeySPKI);
-            }
-        }
-
-        /// <summary>
-        /// The creator end point applies the checks the public-key end point
-        /// applies, so a store holding something a client would refuse as a
-        /// key is a server error on both.
-        /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorRefusesAKeyAClientWouldRefuse()
-        {
-            var store = new DatedKeyStore(new[]
-            {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "not a key" },
-            });
-            using (var controller = new OwidController(Configuration!, store))
-            {
-                var result = (await controller.GetCreator()).Result as ObjectResult;
-                Assert.IsNotNull(result, "a key that cannot be read is answered with a status");
-                Assert.AreEqual(StatusCodes.Status500InternalServerError, result!.StatusCode);
-            }
-        }
-
-        /// <summary>
-        /// A date before any known key produces a 404 on the creator endpoint.
-        /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorDateBeforeOldestReturns404()
-        {
-            var store = new DatedKeyStore(new[]
-            {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
-            });
-            using (var controller = new OwidController(Configuration!, store))
-            {
-                var result = await controller.GetCreator(1440);
-                Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
-            }
-        }
-
-        /// <summary>
         /// A supplied date is resolved through the injected key store.
         /// </summary>
         [TestMethod]
@@ -241,13 +164,13 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// An undated request when no key has started yet is a 404 on both
-        /// end points, never a success with no key in it. A schedule is
-        /// published ahead of time, so this is an ordinary state for a
-        /// creator whose first period has not begun.
+        /// An undated request when no key has started yet is a 404, never a
+        /// success with no key in it. A schedule is published ahead of time,
+        /// so this is an ordinary state for a creator whose first period has
+        /// not begun.
         /// </summary>
         [TestMethod]
-        public async Task TestNothingInForceYetReturns404OnBothEndPoints()
+        public async Task TestNothingInForceYetReturns404()
         {
             var store = new DatedKeyStore(new[]
             {
@@ -262,9 +185,6 @@ namespace Owid.Client.Test
                 Assert.IsInstanceOfType(
                     (await controller.GetPublicKey()).Result,
                     typeof(NotFoundResult));
-                Assert.IsInstanceOfType(
-                    (await controller.GetCreator()).Result,
-                    typeof(NotFoundResult));
             }
         }
 
@@ -274,7 +194,7 @@ namespace Owid.Client.Test
         /// out. This is what the 51Degrees cloud does with the same request.
         /// </summary>
         [TestMethod]
-        public async Task TestFutureDateIsReadAsNowOnBothEndPoints()
+        public async Task TestFutureDateIsReadAsNow()
         {
             var now = DateTime.UtcNow;
             var inForce = FreshPem();
@@ -298,9 +218,6 @@ namespace Owid.Client.Test
                 Assert.AreEqual(
                     inForce,
                     (await controller.GetPublicKey(nextMonth)).Value!.PublicKeySPKI);
-                Assert.AreEqual(
-                    inForce,
-                    (await controller.GetCreator(nextMonth)).Value!.PublicKeySPKI);
                 // The largest value the parameter can carry is later than
                 // now as well, so it takes the same answer.
                 Assert.AreEqual(
@@ -310,7 +227,7 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// A denying authorizer's result is returned from both endpoints.
+        /// A denying authorizer's result is returned from the end point.
         /// </summary>
         [TestMethod]
         public async Task TestAuthorizerDeniedResultIsReturned()
@@ -326,9 +243,6 @@ namespace Owid.Client.Test
                 Assert.IsInstanceOfType(
                     (await controller.GetPublicKey()).Result,
                     typeof(UnauthorizedResult));
-                Assert.IsInstanceOfType(
-                    (await controller.GetCreator()).Result,
-                    typeof(UnauthorizedResult));
             }
         }
 
@@ -336,7 +250,7 @@ namespace Owid.Client.Test
         /// An authorizer that returns null lets the request through.
         /// </summary>
         [TestMethod]
-        public async Task TestAuthorizerAllowingRequestReturnsValues()
+        public async Task TestAuthorizerAllowingRequestReturnsTheKey()
         {
             var authorizer = new StubAuthorizer(null);
             using (var controller = new OwidController(
@@ -349,9 +263,6 @@ namespace Owid.Client.Test
                 Assert.AreEqual(
                     Configuration!.PublicKey,
                     (await controller.GetPublicKey()).Value!.PublicKeySPKI);
-                Assert.AreEqual(
-                    Configuration!.Domain,
-                    (await controller.GetCreator()).Value!.Domain);
             }
         }
 

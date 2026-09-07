@@ -33,7 +33,6 @@ namespace Owid.Client.Controllers
     [ApiController]
     public class OwidController : Controller
     {
-        private readonly OwidConfiguration _owidConfiguration;
         private readonly IPublicKeyStore _publicKeyStore;
         private readonly IOwidAuthorizer? _authorizer;
 
@@ -60,7 +59,6 @@ namespace Owid.Client.Controllers
             IPublicKeyStore? publicKeyStore = null,
             IOwidAuthorizer? authorizer = null)
         {
-            _owidConfiguration = owidConfiguration;
             _publicKeyStore = publicKeyStore
                 ?? new ConfigurationPublicKeyStore(owidConfiguration);
             _authorizer = authorizer;
@@ -149,59 +147,6 @@ namespace Owid.Client.Controllers
         {
             var minutes = (DateTime.UtcNow - OwidBaseDate).TotalMinutes;
             return minutes >= uint.MaxValue ? uint.MaxValue : (uint)minutes;
-        }
-
-        /// <summary>
-        /// Returns the creator domain and signing public key. With a date,
-        /// returns the key in force at that date. Without one, the key in
-        /// force now, and a date later than the moment of the request is read
-        /// as that moment. The key is checked the way the public-key end
-        /// point checks its answer before it is sent, so the two agree.
-        /// </summary>
-        /// <param name="date">
-        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
-        /// encoding).
-        /// </param>
-        /// <returns>
-        /// The creator info, 404 when no key was active at the requested
-        /// date, or 500 when the store holds something a client would
-        /// refuse as a key.
-        /// </returns>
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        [HttpGet("creator")]
-        [HttpPost("creator")]
-        public async Task<ActionResult<CreatorResponse>> GetCreator(
-            uint? date = null)
-        {
-            var denied = await AuthorizeAsync();
-            if (denied != null)
-            {
-                return denied;
-            }
-            var asked = ClampToNow(date);
-            var period = _publicKeyStore.GetPublicKeyPeriod(asked);
-            var key = period?.PublicKey ?? _publicKeyStore.GetPublicKey(asked);
-            if (key == null)
-            {
-                return NotFound();
-            }
-            try
-            {
-                PublicKeyResponse.For(key, period, asked ?? NowMinutes());
-            }
-            catch (InvalidOperationException e)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, e.Message);
-            }
-            return new CreatorResponse
-            {
-                Domain = _owidConfiguration.Domain,
-                PublicKeySPKI = key,
-            };
         }
 
         private Task<ActionResult?> AuthorizeAsync() =>

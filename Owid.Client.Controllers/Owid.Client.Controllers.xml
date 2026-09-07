@@ -4,24 +4,6 @@
         <name>Owid.Client.Controllers</name>
     </assembly>
     <members>
-        <member name="T:Owid.Client.Controllers.CreatorResponse">
-            <summary>
-            The creator end point response, per the SWAN OWID spec. Carries the
-            creator domain and the signing public key in SPKI form, so a consumer
-            can cache the key without a second call. With a date the key that was
-            current then is returned, matching the public-key end point.
-            </summary>
-        </member>
-        <member name="P:Owid.Client.Controllers.CreatorResponse.Domain">
-            <summary>
-            The domain the key relates to.
-            </summary>
-        </member>
-        <member name="P:Owid.Client.Controllers.CreatorResponse.PublicKeySPKI">
-            <summary>
-            The signing public key in SPKI form.
-            </summary>
-        </member>
         <member name="T:Owid.Client.Controllers.IOwidAuthorizer">
             <summary>
             Decides whether a request may use the public-key and creator
@@ -97,24 +79,6 @@
             <summary>
             Now as minutes since the base date.
             </summary>
-        </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetCreator(System.Nullable{System.UInt32})">
-            <summary>
-            Returns the creator domain and signing public key. With a date,
-            returns the key in force at that date. Without one, the key in
-            force now, and a date later than the moment of the request is read
-            as that moment. The key is checked the way the public-key end
-            point checks its answer before it is sent, so the two agree.
-            </summary>
-            <param name="date">
-            Optional date as minutes since 2020-01-01 UTC (the OWID date
-            encoding).
-            </param>
-            <returns>
-            The creator info, 404 when no key was active at the requested
-            date, or 500 when the store holds something a client would
-            refuse as a key.
-            </returns>
         </member>
     </members>
 </doc>

@@ -15,7 +15,6 @@
  * ***************************************************************************/
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -55,32 +54,114 @@ namespace Owid.Client
 			};
 
 		/// <summary>
-		/// The most public keys held at once. The cache is emptied rather
-		/// than trimmed when it reaches this, which costs the keys still in
-		/// use one request each as they are asked for again and keeps the
-		/// bookkeeping to a count. The Java and Python ports hold the same
-		/// number the same way.
+		/// The most public keys held at once, across every creator. The
+		/// cache is emptied rather than trimmed when it reaches this, which
+		/// costs the keys still in use one request each as they are asked
+		/// for again and keeps the bookkeeping to a count. The other ports
+		/// hold the same number the same way.
 		/// </summary>
 		private const int MaximumCachedKeys = 1024;
 
 		/// <summary>
-		/// Cache used to avoid repeat requests for the same public keys. One
-		/// entry per key URL, holding the fetch, so that callers arriving
-		/// together share one request rather than each making their own and
-		/// a caller arriving later is answered without one.
+		/// One key a creator has answered with, and the span of minutes the
+		/// creator has confirmed it was in force for.
 		/// </summary>
 		/// <remarks>
-		/// A key URL carries the domain and the date of the OWID being
-		/// verified, neither of which this process chooses, so the number of
-		/// distinct URLs is set by the OWIDs presented to it. The cache is
-		/// therefore bounded by <see cref="MaximumCachedKeys"/>.
+		/// A creator's key is in force from the start of its period until
+		/// the next key starts, so a key the creator confirms at two minutes
+		/// was in force at every minute between them. The span grows as the
+		/// creator confirms the same key for more minutes, and an identifier
+		/// dated inside it is verified without a request.
 		/// </remarks>
-		private static readonly ConcurrentDictionary<
-			Uri,
-			Task<string>> _publicKeyCache =
-			new ConcurrentDictionary<
-				Uri,
-				Task<string>>();
+		private sealed class HeldKey
+		{
+			public HeldKey(string pem, uint minute)
+			{
+				Pem = pem;
+				First = minute;
+				Last = minute;
+			}
+
+			/// <summary>
+			/// The key in PEM form, as the creator served it.
+			/// </summary>
+			public string Pem { get; }
+
+			/// <summary>
+			/// The earliest minute the creator has confirmed the key for.
+			/// </summary>
+			public uint First { get; set; }
+
+			/// <summary>
+			/// The latest minute the creator has confirmed the key for.
+			/// </summary>
+			public uint Last { get; set; }
+
+			/// <summary>
+			/// Whether the minute lies within the confirmed span.
+			/// </summary>
+			public bool Covers(uint minute)
+			{
+				return First <= minute && minute <= Last;
+			}
+		}
+
+		/// <summary>
+		/// Guards <see cref="_publicKeyCache"/>, <see cref="_heldKeys"/>
+		/// and <see cref="_inFlight"/>. Held across a few dictionary and
+		/// list operations only, never across a request.
+		/// </summary>
+		private static readonly object _cacheLock = new object();
+
+		/// <summary>
+		/// Keys already fetched, by the creator's key end point, which is
+		/// the key URL without its date. Each end point holds the keys the
+		/// creator has answered with, each with the span of minutes the
+		/// creator has confirmed it for.
+		/// </summary>
+		/// <remarks>
+		/// The key URL carries the date of the OWID being verified, in
+		/// minutes, and a creator's key changes on the order of a week.
+		/// Keyed by the whole URL, as this cache once was, two identifiers
+		/// signed a minute apart never shared an entry, so a hundred
+		/// identifiers over a hundred minutes made a hundred requests for
+		/// one key. Keyed by end point and span, an identifier dated between
+		/// two minutes the creator has already answered for is verified
+		/// without a request. The domain and the date come from the OWIDs
+		/// presented to this process rather than from the process itself,
+		/// so the number of keys held is bounded by
+		/// <see cref="MaximumCachedKeys"/>.
+		/// </remarks>
+		private static readonly Dictionary<string, List<HeldKey>>
+			_publicKeyCache = new Dictionary<string, List<HeldKey>>();
+
+		/// <summary>
+		/// How many keys are held across every end point.
+		/// </summary>
+		private static int _heldKeys;
+
+		/// <summary>
+		/// Requests under way, by the dated URL asked for, so that callers
+		/// arriving together share one request rather than each making
+		/// their own. An entry is removed when its request ends, whatever
+		/// the outcome, so a failure is never handed to a later caller.
+		/// </summary>
+		private static readonly Dictionary<Uri, Task<string>> _inFlight =
+			new Dictionary<Uri, Task<string>>();
+
+		/// <summary>
+		/// How many keys the cache holds, for the tests.
+		/// </summary>
+		internal static int CachedKeyCount
+		{
+			get
+			{
+				lock (_cacheLock)
+				{
+					return _heldKeys;
+				}
+			}
+		}
 
 		/// <summary>
 		/// Verify that <see cref="Owid"/> signature is correct, fetching the
@@ -353,9 +434,10 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Get the public key PEM from the URL if it is not already in the
-		/// cache. Callers arriving while a fetch for the same URL is in
-		/// flight share that fetch rather than starting their own.
+		/// Get the public key PEM for the key URL. Answered from the cache
+		/// where the creator has already confirmed a key for the minute the
+		/// URL names, from a request already under way for the same URL
+		/// where there is one, and otherwise by asking the creator.
 		/// </summary>
 		/// <remarks>
 		/// The token ends this caller's wait, not the shared request. A
@@ -368,35 +450,42 @@ namespace Owid.Client
 		/// <param name="u"></param>
 		/// <param name="cancellationToken"></param>
 		/// <returns></returns>
-        // Internal rather than private so the test project can point it
-        // at a stand in end point by URL, since the domain an OWID carries
-        // cannot name a port.
-        internal static Task<string> GetPublicKeyAsync(
+		// Internal rather than private so the test project can point it
+		// at a stand in end point by URL, since the domain an OWID carries
+		// cannot name a port.
+		internal static Task<string> GetPublicKeyAsync(
 			Uri u,
 			CancellationToken cancellationToken = default)
-        {
-			if (_publicKeyCache.TryGetValue(u, out var held) == false)
+		{
+			var endPoint = EndPointOf(u);
+			var minute = MinuteOf(u);
+			Task<string>? held;
+			TaskCompletionSource<string>? source = null;
+			lock (_cacheLock)
 			{
-				// Emptied rather than allowed to grow without limit, because
-				// the URLs asked for come from the OWIDs presented to this
-				// process rather than from the process itself.
-				if (_publicKeyCache.Count >= MaximumCachedKeys)
+				var pem = HeldPem(endPoint, minute);
+				if (pem != null)
 				{
-					_publicKeyCache.Clear();
+					return Task.FromResult(pem);
 				}
-				var source = new TaskCompletionSource<string>(
-					TaskCreationOptions.RunContinuationsAsynchronously);
-				held = _publicKeyCache.GetOrAdd(u, source.Task);
-				if (ReferenceEquals(held, source.Task))
+				if (_inFlight.TryGetValue(u, out held) == false)
 				{
-					// This caller is the one that added the entry, so this
+					// This caller is the one that adds the entry, so this
 					// caller is the one that performs the request. Every
-					// other caller waits on the task just added.
-					_ = FetchIntoAsync(u, source);
+					// other caller arriving before it ends waits on the
+					// task just added.
+					source = new TaskCompletionSource<string>(
+						TaskCreationOptions.RunContinuationsAsynchronously);
+					held = source.Task;
+					_inFlight[u] = held;
 				}
 			}
+			if (source != null)
+			{
+				_ = FetchIntoAsync(u, endPoint, minute, source);
+			}
 			return held.WaitAsync(cancellationToken);
-        }
+		}
 
 		/// <summary>
 		/// Perform the request for <paramref name="u"/> and put its outcome
@@ -404,14 +493,16 @@ namespace Owid.Client
 		/// for that URL is waiting on.
 		/// </summary>
 		/// <remarks>
-		/// A fetch that fails is taken out of the cache, so the next caller
-		/// makes a fresh request rather than being handed the old failure.
-		/// The entry is matched on identity as well as URL, so a fetch that
-		/// fails after the cache was emptied and filled again removes only
-		/// itself and never whatever replaced it.
+		/// A key that arrives is held against the minute asked about before
+		/// the request is forgotten, so a caller arriving between the two
+		/// finds the key rather than starting a request of its own. A fetch
+		/// that fails is only forgotten, so the next caller makes a fresh
+		/// request rather than being handed the old failure.
 		/// </remarks>
 		private static async Task FetchIntoAsync(
 			Uri u,
+			string endPoint,
+			uint minute,
 			TaskCompletionSource<string> source)
 		{
 			try
@@ -424,24 +515,197 @@ namespace Owid.Client
 				var publicKey = await new HttpClient(_handler, false)
 					.GetStringAsync(u)
 					.ConfigureAwait(false);
+				lock (_cacheLock)
+				{
+					Hold(endPoint, minute, publicKey);
+					Forget(u, source.Task);
+				}
 				source.SetResult(publicKey);
 			}
 			catch (Exception e)
 			{
-				_publicKeyCache.TryRemove(
-					new KeyValuePair<Uri, Task<string>>(u, source.Task));
+				lock (_cacheLock)
+				{
+					Forget(u, source.Task);
+				}
 				source.SetException(e);
 			}
 		}
 
 		/// <summary>
+		/// Removes the request from those under way. The entry is matched
+		/// on identity as well as URL, so a request that ends after the
+		/// cache was emptied and a fresh request started for the same URL
+		/// removes only itself and never the one that replaced it.
+		/// </summary>
+		private static void Forget(Uri u, Task<string> request)
+		{
+			if (_inFlight.TryGetValue(u, out var recorded)
+				&& ReferenceEquals(recorded, request))
+			{
+				_inFlight.Remove(u);
+			}
+		}
+
+		/// <summary>
+		/// The key URL without its query, which names the scheme, the
+		/// creator and the version, and so the key end point being asked.
+		/// </summary>
+		private static string EndPointOf(Uri u)
+		{
+			return u.GetLeftPart(UriPartial.Path);
+		}
+
+		/// <summary>
+		/// The minute the cache reads the URL as asking about.
+		/// </summary>
+		/// <remarks>
+		/// The date parameter where the URL carries one, and otherwise now,
+		/// because a creator answers a request without a date with the key
+		/// in force now. A date later than now is read as now as well,
+		/// because that is how a creator reads it. A schedule is published
+		/// ahead of time and a key that has not started has signed nothing,
+		/// so the creator answers a future date with the key in force now,
+		/// and that answer must be held against now rather than against a
+		/// minute the creator has not spoken for. Held against the future
+		/// minute, the key would still be served for that minute after the
+		/// creator had rotated, and a genuine identifier signed then would
+		/// read as not matching.
+		/// </remarks>
+		private static uint MinuteOf(Uri u)
+		{
+			var now = (uint)Math.Min(
+				(DateTime.UtcNow - Constants.BaseDate).TotalMinutes,
+				uint.MaxValue);
+			foreach (var pair in u.Query.TrimStart('?').Split('&'))
+			{
+				if (pair.StartsWith("date=", StringComparison.Ordinal)
+					&& uint.TryParse(pair.Substring(5), out var minute))
+				{
+					return Math.Min(minute, now);
+				}
+			}
+			return now;
+		}
+
+		/// <summary>
+		/// The key held for the end point whose confirmed span covers the
+		/// minute, or null where no held key does. Called under the lock.
+		/// </summary>
+		private static string? HeldPem(string endPoint, uint minute)
+		{
+			if (_publicKeyCache.TryGetValue(endPoint, out var keys))
+			{
+				foreach (var key in keys)
+				{
+					if (key.Covers(minute))
+					{
+						return key.Pem;
+					}
+				}
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Records that the creator answered the minute with the key. Called
+		/// under the lock.
+		/// </summary>
+		/// <remarks>
+		/// A key already held for the end point has its span widened to take
+		/// in the minute. A key not held before is added, emptying the cache
+		/// first when it is full, because the domains and dates asked about
+		/// come from the OWIDs presented to this process and the cache must
+		/// not grow on their input.
+		/// </remarks>
+		private static void Hold(string endPoint, uint minute, string pem)
+		{
+			if (_publicKeyCache.TryGetValue(endPoint, out var keys))
+			{
+				foreach (var key in keys)
+				{
+					if (key.Pem == pem && Widen(keys, key, minute))
+					{
+						return;
+					}
+				}
+			}
+			else
+			{
+				keys = null;
+			}
+			if (_heldKeys >= MaximumCachedKeys)
+			{
+				_publicKeyCache.Clear();
+				_heldKeys = 0;
+				keys = null;
+			}
+			if (keys == null)
+			{
+				keys = new List<HeldKey>();
+				_publicKeyCache[endPoint] = keys;
+			}
+			keys.Add(new HeldKey(pem, minute));
+			_heldKeys++;
+		}
+
+		/// <summary>
+		/// Widens the span of a held key to take in the minute, and says
+		/// whether the minute is now within it.
+		/// </summary>
+		/// <remarks>
+		/// The span is not widened across a minute the creator has answered
+		/// with another key for, because that would mean the creator had
+		/// gone back to a key it had left, and the minutes between the two
+		/// spans are then not this key's to claim. The key is held again as
+		/// a separate span instead.
+		/// </remarks>
+		private static bool Widen(List<HeldKey> keys, HeldKey key, uint minute)
+		{
+			if (key.Covers(minute))
+			{
+				return true;
+			}
+			var from = Math.Min(minute, key.First);
+			var to = Math.Max(minute, key.Last);
+			foreach (var other in keys)
+			{
+				if (ReferenceEquals(other, key) == false
+					&& other.Last > from
+					&& other.First < to)
+				{
+					return false;
+				}
+			}
+			if (minute < key.First)
+			{
+				key.First = minute;
+			}
+			else
+			{
+				key.Last = minute;
+			}
+			return true;
+		}
+
+		/// <summary>
 		/// Empty the public key cache, so that the next verification of any
-		/// OWID fetches the creator's key again. The Java and Python ports
-		/// offer the same.
+		/// OWID fetches the creator's key again, and forget the requests
+		/// under way so that the next caller for any key starts a request
+		/// of its own. A request already under way is not stopped, and the
+		/// callers waiting on it still receive its answer. This is how a
+		/// long running process drops a key it has learned it should no
+		/// longer trust, after a creator rotates its key following a
+		/// compromise. The other ports offer the same.
 		/// </summary>
 		public static void ClearPublicKeyCache()
 		{
-			_publicKeyCache.Clear();
+			lock (_cacheLock)
+			{
+				_publicKeyCache.Clear();
+				_heldKeys = 0;
+				_inFlight.Clear();
+			}
 		}
 	}
 }

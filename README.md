@@ -132,6 +132,20 @@ using (var crypto = ECDsa.Create())
 var validFromDomain = await owid!.VerifyAsync(cancellationToken);
 ```
 
+Keys fetched from a creator are held in memory. The request names the
+minute the OWID was created, so a creator that rotates its key answers with
+the key in force then. Each key is held against the span of minutes the
+creator has confirmed it for, because a key is in force from the start of its
+period until the next key starts, so a key confirmed at two minutes was in
+force at every minute between them. An OWID dated inside a confirmed span is
+verified without a request, whichever minute it carries, and one dated
+outside every span is asked about, which widens the span when the same key
+comes back. At most 1024 keys are held across every creator before the cache
+is emptied and filled again, and `ClearPublicKeyCache` empties it on demand,
+which is how a long running process drops a key it has learned it should no
+longer trust. Callers arriving together for one key share one request, and
+a request that fails is not held.
+
 ### Read an OWID, and what a failure means
 
 Three surfaces read an OWID, and none of them throws for bad data, because an

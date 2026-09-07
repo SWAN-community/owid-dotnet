@@ -1,4 +1,4 @@
-﻿/* ****************************************************************************
+/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -28,8 +28,10 @@ namespace Owid.Client.Test
 {
     /// <summary>
     /// The fetch of a creator's public key is asynchronous all the way down,
-    /// shares one request between callers that arrive together, and never
-    /// keeps a failed request in the cache.
+    /// shares one request between callers that arrive together, never keeps
+    /// a failed request in the cache, and holds each key against the span of
+    /// minutes the creator has confirmed it for rather than against the
+    /// minute of one identifier.
     /// </summary>
     [TestClass]
     public class PublicKeyFetchTests
@@ -38,14 +40,57 @@ namespace Owid.Client.Test
             "-----BEGIN PUBLIC KEY-----\nbm90IGEga2V5\n-----END PUBLIC KEY-----\n";
 
         /// <summary>
+        /// The minute the fixture identifier used across the ports was
+        /// created at, 2026-09-04T00:00:00Z counted from 2020-01-01. In the
+        /// past, so the cache reads it as itself rather than as now.
+        /// </summary>
+        private const uint Minute = 3_510_720;
+
+        /// <summary>
+        /// The minutes in a week, which is how often the 51Degrees cloud
+        /// rotates its key.
+        /// </summary>
+        private const uint Week = 7 * 24 * 60;
+
+        /// <summary>
+        /// A key URL on the stand in end point for the minute given.
+        /// </summary>
+        private static Uri Dated(string prefix, uint minute)
+        {
+            return new Uri(prefix + "owid/api/v3/public-key?format=pkcs&date=" + minute);
+        }
+
+        /// <summary>
+        /// The minute the cache reads now as, counted the way the library
+        /// counts it.
+        /// </summary>
+        private static uint Now()
+        {
+            var baseDate = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            return (uint)(DateTime.UtcNow - baseDate).TotalMinutes;
+        }
+
+        /// <summary>
+        /// The value of the date parameter of a request, or null where it
+        /// carries none.
+        /// </summary>
+        private static uint? DateOf(HttpListenerRequest request)
+        {
+            var date = request.QueryString["date"];
+            return date == null ? null : uint.Parse(date);
+        }
+
+        /// <summary>
         /// Serves every request the listener receives with the handler's
         /// verdict, until stopped. The handler returns the status code to
-        /// send, and a 200 carries the PEM as its body.
+        /// send, and a 200 carries as its body the PEM the second handler
+        /// gives for the request, or the fixed PEM where there is none.
         /// </summary>
         private static Task Serve(
             HttpListener listener,
             CancellationToken stop,
-            Func<Task<int>> handler)
+            Func<Task<int>> handler,
+            Func<HttpListenerRequest, string>? pemFor = null)
         {
             return Task.Run(async () =>
             {
@@ -60,7 +105,10 @@ namespace Owid.Client.Test
                         context.Response.StatusCode = status;
                         if (status == 200)
                         {
-                            var bytes = Encoding.UTF8.GetBytes(Pem);
+                            var pem = pemFor == null
+                                ? Pem
+                                : pemFor(context.Request);
+                            var bytes = Encoding.UTF8.GetBytes(pem);
                             context.Response.ContentType = "text/plain";
                             await context.Response.OutputStream.WriteAsync(
                                 bytes, 0, bytes.Length);
@@ -90,6 +138,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task ConcurrentCallersShareOneRequest()
         {
+            CryptoExtensions.ClearPublicKeyCache();
             var hits = 0;
             var firstRequestArrived = new TaskCompletionSource<bool>();
             var release = new TaskCompletionSource<bool>();
@@ -107,7 +156,7 @@ namespace Owid.Client.Test
 
             try
             {
-                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var url = Dated(prefix, Minute);
                 var first = CryptoExtensions.GetPublicKeyAsync(url);
                 await firstRequestArrived.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 var second = CryptoExtensions.GetPublicKeyAsync(url);
@@ -134,6 +183,7 @@ namespace Owid.Client.Test
                 stop.Cancel();
                 creator.Stop();
                 await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
             }
         }
 
@@ -144,6 +194,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task AFailedRequestIsNotCached()
         {
+            CryptoExtensions.ClearPublicKeyCache();
             var hits = 0;
             using var creator = Loopback.Listen(out var prefix);
             using var stop = new CancellationTokenSource();
@@ -156,7 +207,7 @@ namespace Owid.Client.Test
 
             try
             {
-                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var url = Dated(prefix, Minute);
                 HttpRequestException? failed = null;
                 try
                 {
@@ -181,6 +232,7 @@ namespace Owid.Client.Test
                 stop.Cancel();
                 creator.Stop();
                 await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
             }
         }
 
@@ -191,6 +243,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task ACancelledCallerStopsWaiting()
         {
+            CryptoExtensions.ClearPublicKeyCache();
             var release = new TaskCompletionSource<bool>();
             using var creator = Loopback.Listen(out var prefix);
             using var stop = new CancellationTokenSource();
@@ -202,7 +255,7 @@ namespace Owid.Client.Test
 
             try
             {
-                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var url = Dated(prefix, Minute);
                 using var caller = new CancellationTokenSource();
                 var waiting = CryptoExtensions.GetPublicKeyAsync(url, caller.Token);
                 caller.Cancel();
@@ -215,22 +268,22 @@ namespace Owid.Client.Test
                 stop.Cancel();
                 creator.Stop();
                 await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
             }
         }
 
         /// <summary>
-        /// Many callers arriving at once for a url none of them finds in the
+        /// Many callers arriving at once for a key none of them finds in the
         /// cache still make one request between them.
         /// </summary>
         /// <remarks>
-        /// The test above lets the first caller insert its entry before the
-        /// second arrives, so it never exercises the insert itself. Here
-        /// every caller is released together and all of them miss the cache,
-        /// so all of them reach the insert at once. Exactly one may go on to
-        /// perform the request. This is what the Lazy of Task arrangement is
-        /// usually reached for, and what taking the value overload of GetOrAdd
-        /// rather than the factory overload gives instead, since a factory is
-        /// allowed to run more than once under contention.
+        /// The test above lets the first caller record its request before
+        /// the second arrives, so it never exercises the contention itself.
+        /// Here every caller is released together and all of them miss the
+        /// cache, so all of them reach the record of requests under way at
+        /// once. Exactly one may go on to perform the request. Replace the
+        /// lookup of the requests under way with one that never finds
+        /// anything and this test fails reporting many requests.
         /// </remarks>
         [TestMethod]
         public async Task ManyCallersArrivingTogetherMakeOneRequest()
@@ -252,7 +305,7 @@ namespace Owid.Client.Test
 
             try
             {
-                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var url = Dated(prefix, Minute);
                 var start = new TaskCompletionSource<bool>();
                 var waiting = new Task<string>[callers];
                 for (var i = 0; i < callers; i++)
@@ -287,10 +340,240 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
+        /// A key the creator has confirmed for two minutes is served for
+        /// every minute between them without a request, because a key is in
+        /// force from the start of its period until the next key starts. A
+        /// minute outside the confirmed span is asked about, and the answer
+        /// widens the span.
+        /// </summary>
+        [TestMethod]
+        public async Task AMinuteBetweenTwoConfirmedMinutesIsServedFromTheCache()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, () =>
+            {
+                Interlocked.Increment(ref hits);
+                return Task.FromResult(200);
+            });
+
+            try
+            {
+                // The week before the fixture minute, so every minute here
+                // is in the past and the cache reads each as itself.
+                var first = Minute - Week;
+                var last = Minute - 1;
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, first));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, last));
+                Assert.AreEqual(2, hits, "the two ends of the span were asked about");
+
+                foreach (var between in new[] { first + 1, first + Week / 2, last - 1 })
+                {
+                    var key = await CryptoExtensions.GetPublicKeyAsync(
+                        Dated(prefix, between));
+                    Assert.AreEqual(Pem, key);
+                }
+                Assert.AreEqual(2, hits,
+                    "a minute between two confirmed minutes is not asked about");
+                Assert.AreEqual(1, CryptoExtensions.CachedKeyCount,
+                    "one key is held however many minutes it covers");
+
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, last + 1));
+                Assert.AreEqual(3, hits, "a minute past the span is asked about");
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, first - 1));
+                Assert.AreEqual(4, hits, "a minute before the span is asked about");
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, last + 1));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, first - 1));
+                Assert.AreEqual(4, hits, "the span now takes in both");
+                Assert.AreEqual(1, CryptoExtensions.CachedKeyCount,
+                    "the same key was answered, so the span widened rather "
+                    + "than a second key being held");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// The case that made the cache almost useless when it was keyed by
+        /// the whole URL. A hundred identifiers with a hundred different
+        /// minutes inside one key's period cost a hundred requests then.
+        /// With the ends of the period confirmed they cost none.
+        /// </summary>
+        [TestMethod]
+        public async Task AHundredIdentifiersInOneConfirmedPeriodMakeNoRequest()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, () =>
+            {
+                Interlocked.Increment(ref hits);
+                return Task.FromResult(200);
+            });
+
+            try
+            {
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, Minute));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, Minute + 100));
+                for (uint i = 1; i <= 100; i++)
+                {
+                    await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, Minute + i));
+                }
+                Assert.AreEqual(2, hits,
+                    "a hundred identifiers over a hundred minutes made no "
+                    + "request once both ends of the span were known");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// A key is only ever served for a minute inside the span the
+        /// creator has confirmed it for. Where the creator rotated between
+        /// two confirmed minutes, the minutes between them belong to
+        /// neither key until the creator is asked, and every answer agrees
+        /// with what the creator would have said.
+        /// </summary>
+        [TestMethod]
+        public async Task AKeyIsNeverServedForAMinuteOutsideItsConfirmedSpan()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            const string earlier = "-----BEGIN PUBLIC KEY-----\nZWFybGllcg==\n-----END PUBLIC KEY-----\n";
+            const string later = "-----BEGIN PUBLIC KEY-----\nbGF0ZXI=\n-----END PUBLIC KEY-----\n";
+            // A week before the fixture minute, so the fortnight around it
+            // is in the past and the cache reads each minute as itself.
+            var rotation = Minute - Week;
+            Func<uint, string> inForce = minute => minute < rotation ? earlier : later;
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(
+                creator,
+                stop.Token,
+                () =>
+                {
+                    Interlocked.Increment(ref hits);
+                    return Task.FromResult(200);
+                },
+                request => inForce(DateOf(request)!.Value));
+
+            try
+            {
+                // A minute a week before the rotation and one a week after
+                // it, so the two keys are held with the rotation between.
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, rotation - Week));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, rotation + Week));
+                Assert.AreEqual(2, hits);
+                Assert.AreEqual(2, CryptoExtensions.CachedKeyCount);
+
+                // Every minute across the rotation, in an order that walks
+                // in from both sides, is answered with the key the creator
+                // would give, whether from the cache or by asking.
+                var minutes = new[]
+                {
+                    rotation - 1, rotation, rotation - 2, rotation + 1,
+                    rotation - Week / 2, rotation + Week / 2,
+                    rotation - 3, rotation + 2, rotation - 1, rotation,
+                };
+                foreach (var minute in minutes)
+                {
+                    var key = await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, minute));
+                    Assert.AreEqual(inForce(minute), key,
+                        "the key served for minute " + minute);
+                }
+                Assert.AreEqual(2, CryptoExtensions.CachedKeyCount,
+                    "two keys are held, each with its own span");
+                Assert.IsTrue(hits > 2 && hits < 2 + minutes.Length,
+                    "some minutes were asked about and some were served: " + hits);
+
+                // The minute either side of the rotation is now confirmed,
+                // so nothing across the whole fortnight needs asking.
+                var before = hits;
+                for (var minute = rotation - Week; minute <= rotation + Week; minute += 60)
+                {
+                    var key = await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, minute));
+                    Assert.AreEqual(inForce(minute), key,
+                        "the key served for minute " + minute);
+                }
+                Assert.AreEqual(before, hits,
+                    "both spans are fully confirmed, so nothing was asked");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
+        /// A date later than now is held against now, because a creator
+        /// answers a future date with the key in force now and a key held
+        /// against a minute the creator has not spoken for would be served
+        /// for that minute after the creator had rotated. Two future dates
+        /// therefore share one request, and so does a request with no date.
+        /// </summary>
+        [TestMethod]
+        public async Task AFutureDateIsHeldAgainstNow()
+        {
+            CryptoExtensions.ClearPublicKeyCache();
+            var hits = 0;
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, () =>
+            {
+                Interlocked.Increment(ref hits);
+                return Task.FromResult(200);
+            });
+
+            try
+            {
+                var started = Now();
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, started + Week));
+                await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, started + 2 * Week));
+                await CryptoExtensions.GetPublicKeyAsync(
+                    new Uri(prefix + "owid/api/v3/public-key?format=pkcs"));
+                if (Now() != started)
+                {
+                    Assert.Inconclusive(
+                        "the minute changed during the test, so the calls "
+                        + "were not all about the same now");
+                }
+                Assert.AreEqual(1, hits,
+                    "two future dates and no date are all now, and now was "
+                    + "asked about once");
+            }
+            finally
+            {
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
+            }
+        }
+
+        /// <summary>
         /// The cache does not grow without limit. A key url carries the
         /// domain and the date of the OWID being verified, so the number of
-        /// distinct urls is chosen by whoever presents the OWIDs rather than
-        /// by this process, and an unbounded cache would grow on their input.
+        /// distinct keys a verifier is shown is chosen by whoever presents
+        /// the OWIDs rather than by this process, and an unbounded cache
+        /// would grow on their input. The stand in creator here answers
+        /// every minute with a different key, which is the worst a creator
+        /// can do to the cache.
         /// </summary>
         [TestMethod]
         public async Task TheCacheDoesNotGrowWithoutLimit()
@@ -298,17 +581,22 @@ namespace Owid.Client.Test
             CryptoExtensions.ClearPublicKeyCache();
             using var creator = Loopback.Listen(out var prefix);
             using var stop = new CancellationTokenSource();
-            var serving = Serve(creator, stop.Token, () => Task.FromResult(200));
+            var serving = Serve(
+                creator,
+                stop.Token,
+                () => Task.FromResult(200),
+                request => "-----BEGIN PUBLIC KEY-----\n"
+                    + DateOf(request)
+                    + "\n-----END PUBLIC KEY-----\n");
 
             try
             {
-                // One more distinct url than the cache is allowed to hold,
+                // One more distinct key than the cache is allowed to hold,
                 // each standing for an OWID with its own date.
                 var maximum = Maximum();
                 for (var i = 0; i <= maximum; i++)
                 {
-                    await CryptoExtensions.GetPublicKeyAsync(new Uri(
-                        prefix + "owid/api/v3/public-key?format=pkcs&date=" + i));
+                    await CryptoExtensions.GetPublicKeyAsync(Dated(prefix, (uint)i));
                 }
 
                 Assert.IsTrue(
@@ -342,7 +630,7 @@ namespace Owid.Client.Test
 
             try
             {
-                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var url = Dated(prefix, Minute);
                 await CryptoExtensions.GetPublicKeyAsync(url);
                 await CryptoExtensions.GetPublicKeyAsync(url);
                 Assert.AreEqual(1, hits, "the second call came from the cache");
@@ -378,12 +666,7 @@ namespace Owid.Client.Test
         /// </summary>
         private static int Held()
         {
-            var field = typeof(CryptoExtensions).GetField(
-                "_publicKeyCache",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.IsNotNull(field, "the cache exists");
-            dynamic cache = field!.GetValue(null)!;
-            return (int)cache.Count;
+            return CryptoExtensions.CachedKeyCount;
         }
 
         /// <summary>

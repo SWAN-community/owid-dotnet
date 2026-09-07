@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -51,13 +51,25 @@ namespace Owid.Client.Test
                     HttpListenerContext context;
                     try { context = await elsewhere.GetContextAsync(); }
                     catch (Exception) { return; }
-                    Interlocked.Increment(ref elsewhereHits);
-                    var bytes = Encoding.UTF8.GetBytes(
-                        "-----BEGIN PUBLIC KEY-----\nbm90IGEga2V5\n-----END PUBLIC KEY-----\n");
-                    context.Response.StatusCode = 200;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
-                    context.Response.Close();
+                    try
+                    {
+                        Interlocked.Increment(ref elsewhereHits);
+                        var bytes = Encoding.UTF8.GetBytes(
+                            "-----BEGIN PUBLIC KEY-----\nbm90IGEga2V5\n-----END PUBLIC KEY-----\n");
+                        context.Response.StatusCode = 200;
+                        context.Response.ContentType = "text/plain";
+                        await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+                        context.Response.Close();
+                    }
+                    catch (Exception)
+                    {
+                        // A test that has finished stops its listener,
+                        // which can happen while a response is still
+                        // being written. Nothing here is under test, so
+                        // the loop ends quietly rather than faulting the
+                        // serving task.
+                        return;
+                    }
                 }
             });
             var serveCreator = Task.Run(async () =>
@@ -67,9 +79,21 @@ namespace Owid.Client.Test
                     HttpListenerContext context;
                     try { context = await creator.GetContextAsync(); }
                     catch (Exception) { return; }
-                    context.Response.StatusCode = 302;
-                    context.Response.RedirectLocation = elsewherePrefix + "key.pem";
-                    context.Response.Close();
+                    try
+                    {
+                        context.Response.StatusCode = 302;
+                        context.Response.RedirectLocation = elsewherePrefix + "key.pem";
+                        context.Response.Close();
+                    }
+                    catch (Exception)
+                    {
+                        // A test that has finished stops its listener,
+                        // which can happen while a response is still
+                        // being written. Nothing here is under test, so
+                        // the loop ends quietly rather than faulting the
+                        // serving task.
+                        return;
+                    }
                 }
             });
 

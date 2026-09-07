@@ -54,16 +54,30 @@ namespace Owid.Client.Test
                     HttpListenerContext context;
                     try { context = await listener.GetContextAsync(); }
                     catch (Exception) { return; }
-                    var status = await handler();
-                    context.Response.StatusCode = status;
-                    if (status == 200)
+                    try
                     {
-                        var bytes = Encoding.UTF8.GetBytes(Pem);
-                        context.Response.ContentType = "text/plain";
-                        await context.Response.OutputStream.WriteAsync(
-                            bytes, 0, bytes.Length);
+                        var status = await handler();
+                        context.Response.StatusCode = status;
+                        if (status == 200)
+                        {
+                            var bytes = Encoding.UTF8.GetBytes(Pem);
+                            context.Response.ContentType = "text/plain";
+                            await context.Response.OutputStream.WriteAsync(
+                                bytes, 0, bytes.Length);
+                        }
+                        context.Response.Close();
                     }
-                    context.Response.Close();
+                    catch (Exception)
+                    {
+                        // A test that has finished stops its listener,
+                        // which can happen while a response is still
+                        // being written to a caller that has already
+                        // gone away. Nothing here is under test, so the
+                        // loop ends quietly rather than faulting the
+                        // serving task and failing the test that is
+                        // tidying up after itself.
+                        return;
+                    }
                 }
             });
         }
@@ -201,6 +215,74 @@ namespace Owid.Client.Test
                 stop.Cancel();
                 creator.Stop();
                 await serving.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
+
+        /// <summary>
+        /// Many callers arriving at once for a url none of them finds in the
+        /// cache still make one request between them.
+        /// </summary>
+        /// <remarks>
+        /// The test above lets the first caller insert its entry before the
+        /// second arrives, so it never exercises the insert itself. Here
+        /// every caller is released together and all of them miss the cache,
+        /// so all of them reach the insert at once. Exactly one may go on to
+        /// perform the request. This is what the Lazy of Task arrangement is
+        /// usually reached for, and what taking the value overload of GetOrAdd
+        /// rather than the factory overload gives instead, since a factory is
+        /// allowed to run more than once under contention.
+        /// </remarks>
+        [TestMethod]
+        public async Task ManyCallersArrivingTogetherMakeOneRequest()
+        {
+            const int callers = 64;
+            CryptoExtensions.ClearPublicKeyCache();
+            var hits = 0;
+            var release = new TaskCompletionSource<bool>();
+            using var creator = Loopback.Listen(out var prefix);
+            using var stop = new CancellationTokenSource();
+            var serving = Serve(creator, stop.Token, async () =>
+            {
+                Interlocked.Increment(ref hits);
+                // Held so that every caller is still waiting, and a second
+                // request would be counted before the first has answered.
+                await release.Task;
+                return 200;
+            });
+
+            try
+            {
+                var url = new Uri(prefix + "owid/api/v3/public-key?format=pkcs");
+                var start = new TaskCompletionSource<bool>();
+                var waiting = new Task<string>[callers];
+                for (var i = 0; i < callers; i++)
+                {
+                    waiting[i] = Task.Run(async () =>
+                    {
+                        await start.Task;
+                        return await CryptoExtensions.GetPublicKeyAsync(url);
+                    });
+                }
+
+                // Every caller goes at the same moment.
+                start.SetResult(true);
+                release.SetResult(true);
+                var keys = await Task.WhenAll(waiting)
+                    .WaitAsync(TimeSpan.FromSeconds(20));
+
+                Assert.AreEqual(1, hits, "one request for " + callers + " callers");
+                foreach (var key in keys)
+                {
+                    Assert.AreEqual(Pem, key);
+                }
+            }
+            finally
+            {
+                release.TrySetResult(true);
+                stop.Cancel();
+                creator.Stop();
+                await serving.WaitAsync(TimeSpan.FromSeconds(5));
+                CryptoExtensions.ClearPublicKeyCache();
             }
         }
 

@@ -55,7 +55,7 @@
             now as well, so it takes the same answer rather than an error.
             </summary>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32})">
+        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32},System.String)">
             <summary>
             Returns the public key for the OWID creator as a
             <see cref="T:Owid.Client.Model.PublicKeyResponse"/>, being the key and the moments it
@@ -68,11 +68,16 @@
             </summary>
             <param name="date">
             Optional date as minutes since 2020-01-01 UTC (the OWID date
-            encoding).
+            encoding), being the minute the key is asked for.
+            </param>
+            <param name="format">
+            Optional encoding of the key in the answer. The only value
+            defined is spki, which is taken when the parameter is absent, and
+            any other value is answered 400.
             </param>
             <returns>
-            The public key answer, or 404 when no key was active at the
-            requested date.
+            The public key answer, 400 for a format this creator does not
+            serve, or 404 when no key was active at the requested date.
             </returns>
         </member>
         <member name="M:Owid.Client.Controllers.OwidController.NowMinutes">

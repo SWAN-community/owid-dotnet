@@ -246,32 +246,5 @@ namespace Owid.Client.Test
                 () => owid.AsByteArray());
             StringAssert.Contains(refused.Message, "253");
         }
-
-        /// <summary>
-        /// Signing gathers the bytes of the OWID and of the others it is
-        /// signed with before the key is used, so an other carrying a
-        /// domain over the maximum is refused before the signature is
-        /// computed. The creator's key is disposed once the creator holds
-        /// it, so reaching the signature at all would fail about the key
-        /// rather than about the domain.
-        /// </summary>
-        [TestMethod]
-        public void SigningWithOverLongOtherDomain_IsRefusedBeforeSigning()
-        {
-            var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var creator = new Creator("51d.es", crypto);
-            crypto.Dispose();
-            var other = new Model.Owid()
-            {
-                Domain = DomainOfLength(254),
-                PayloadInternal = Payload,
-                SignatureInternal = Signature,
-            };
-            var refused = Assert.ThrowsExactly<Exception>(
-                () => creator.Sign(
-                    new Model.Owid() { PayloadInternal = Payload },
-                    other));
-            StringAssert.Contains(refused.Message, "253");
-        }
     }
 }

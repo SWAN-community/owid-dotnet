@@ -403,79 +403,6 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// Test that an OWID signed with others verifies when the same others
-        /// are provided to verification.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersVerifiesWithSameOthers()
-        {
-            var others = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsTrue(await owid.VerifyAsync(crypto, others));
-            }
-        }
-
-        /// <summary>
-        /// Test that an OWID signed with others fails verification when the
-        /// others are not provided.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersFailsWithoutOthers()
-        {
-            var others = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsFalse(await owid.VerifyAsync(crypto));
-            }
-        }
-
-        /// <summary>
-        /// Test that an OWID signed with others fails verification when
-        /// different others are provided.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersFailsWithDifferentOthers()
-        {
-            var others = CreateOthers(2);
-            var different = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsFalse(await owid.VerifyAsync(crypto, different));
-            }
-        }
-
-        /// <summary>
         /// Test that a payload modified after signing fails verification.
         /// </summary>
         [TestMethod]
@@ -739,21 +666,6 @@ namespace Owid.Client.Test
                 creator.Sign(owid);
             }
             return owid;
-        }
-
-        private Model.Owid[] CreateOthers(int count)
-        {
-            var others = new Model.Owid[count];
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                for (var i = 0; i < count; i++)
-                {
-                    others[i] = creator.Create($"Other {Guid.NewGuid()}");
-                }
-            }
-            return others;
         }
 
         internal static DateTime FloorToMinute(DateTime date)

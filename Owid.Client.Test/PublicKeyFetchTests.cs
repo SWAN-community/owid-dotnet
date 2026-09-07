@@ -129,7 +129,7 @@ namespace Owid.Client.Test
                             // with one key and no schedule answers.
                             var bytes = Encoding.UTF8.GetBytes(
                                 System.Text.Json.JsonSerializer.Serialize(
-                                    new Model.PublicKeyResponse { PublicKeySPKI = pem }));
+                                    new Model.PublicKeyResponse { PublicKey = pem }));
                             context.Response.ContentType = "application/json";
                             await context.Response.OutputStream.WriteAsync(
                                 bytes, 0, bytes.Length);
@@ -647,7 +647,7 @@ namespace Owid.Client.Test
         {
             return new Model.PublicKeyResponse
             {
-                PublicKeySPKI = pem,
+                PublicKey = pem,
                 ValidFrom = BaseDate.AddMinutes(first),
                 ValidTo = end == null ? null : BaseDate.AddMinutes(end.Value),
             };
@@ -779,7 +779,7 @@ namespace Owid.Client.Test
                 // the first.
                 var late = signedFirst.Create(payload, BaseDate.AddMinutes(rotation + 5));
                 Assert.IsTrue(
-                    await late.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await late.VerifyAtAsync(endPoint, default),
                     "an identifier signed with the earlier key just after the rotation verifies");
                 Assert.AreEqual(2, hits, "the selected key and then the earlier key were asked for");
 
@@ -787,7 +787,7 @@ namespace Owid.Client.Test
                 // second key.
                 var early = signedSecond.Create(payload, BaseDate.AddMinutes(rotation - 5));
                 Assert.IsTrue(
-                    await early.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await early.VerifyAtAsync(endPoint, default),
                     "an identifier signed with the later key just before the rotation verifies");
                 Assert.AreEqual(2, hits, "both keys are held with their spans, so nothing more was asked");
 
@@ -796,7 +796,7 @@ namespace Owid.Client.Test
                 // are allowed to differ.
                 var far = signedFirst.Create(payload, BaseDate.AddMinutes(rotation + 20));
                 Assert.IsFalse(
-                    await far.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await far.VerifyAtAsync(endPoint, default),
                     "an identifier well inside the later key's span signed with the earlier key does not verify");
                 Assert.AreEqual(2, hits, "the identifier is further from every edge than clocks may differ");
             }
@@ -850,7 +850,7 @@ namespace Owid.Client.Test
                 var late = new Creator("creator.test", firstKey)
                     .Create(payload, BaseDate.AddMinutes(rotation + 5));
                 Assert.IsTrue(
-                    await late.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default));
+                    await late.VerifyAtAsync(endPoint, default));
                 CollectionAssert.AreEqual(
                     new uint?[] { rotation + 5, rotation - 1 },
                     asked.ToArray(),
@@ -902,7 +902,7 @@ namespace Owid.Client.Test
                 var live = new Creator("creator.test", firstKey)
                     .Create(payload, BaseDate.AddMinutes(rotation + 2));
                 Assert.IsTrue(
-                    await live.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await live.VerifyAtAsync(endPoint, default),
                     "a live identifier signed with the key before the current one verifies");
                 Assert.AreEqual(2, hits, "the current key and then the key before it were asked for");
             }
@@ -952,17 +952,17 @@ namespace Owid.Client.Test
                     .Create(payload, BaseDate.AddMinutes(rotation - 3 * 24 * 60));
                 Assert.AreEqual(
                     Model.OwidSignatureStatus.KeyUnavailable,
-                    await earlier.SignatureStatusAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await earlier.SignatureStatusAtAsync(endPoint, default),
                     "the key answered with was not in force at the identifier's date");
                 await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-                    () => earlier.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    () => earlier.VerifyAtAsync(endPoint, default),
                     "the boolean form cannot say false without it reading as a forgery");
 
                 var forged = new Creator("creator.test", strangerKey)
                     .Create(payload, BaseDate.AddMinutes(rotation + 3 * 24 * 60));
                 Assert.AreEqual(
                     Model.OwidSignatureStatus.SignatureInvalid,
-                    await forged.SignatureStatusAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                    await forged.SignatureStatusAtAsync(endPoint, default),
                     "a signature failing under the key in force at its date does not match");
             }
             finally
@@ -1026,20 +1026,20 @@ namespace Owid.Client.Test
                 var payload = Encoding.UTF8.GetBytes("payload");
                 var signedCurrent = new Creator("creator.test", currentKey);
                 var first = signedCurrent.Create(payload, rotation.AddDays(3));
-                Assert.IsTrue(await first.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                Assert.IsTrue(await first.VerifyAtAsync(endPoint, default),
                     "the identifier verifies against the key the controller answered with");
                 var second = signedCurrent.Create(payload, rotation.AddDays(6));
-                Assert.IsTrue(await second.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                Assert.IsTrue(await second.VerifyAtAsync(endPoint, default),
                     "a second identifier in the same week verifies");
                 Assert.AreEqual(1, hits, "the whole week was held from the controller's one answer");
 
                 var late = new Creator("creator.test", previousKey).Create(payload, rotation.AddMinutes(5));
-                Assert.IsTrue(await late.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                Assert.IsTrue(await late.VerifyAtAsync(endPoint, default),
                     "an identifier signed with the earlier key just after the rotation verifies");
                 Assert.AreEqual(2, hits, "the earlier key was asked for once");
 
                 var forged = new Creator("creator.test", nextKey).Create(payload, rotation.AddDays(3));
-                Assert.IsFalse(await forged.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default),
+                Assert.IsFalse(await forged.VerifyAtAsync(endPoint, default),
                     "an identifier signed with a key not in force at its date does not verify");
             }
             finally
@@ -1074,7 +1074,7 @@ namespace Owid.Client.Test
                             ? Pem
                             : System.Text.Json.JsonSerializer.Serialize(new Model.PublicKeyResponse
                             {
-                                PublicKeySPKI = Pem,
+                                PublicKey = Pem,
                                 ValidFrom = BaseDate.AddMinutes(Minute),
                                 ValidTo = BaseDate.AddMinutes(Minute - Week),
                             });
@@ -1140,7 +1140,7 @@ namespace Owid.Client.Test
                         await release.Task;
                         var bytes = Encoding.UTF8.GetBytes(
                             System.Text.Json.JsonSerializer.Serialize(
-                                new Model.PublicKeyResponse { PublicKeySPKI = pem }));
+                                new Model.PublicKeyResponse { PublicKey = pem }));
                         context.Response.ContentType = "application/json";
                         await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
                         context.Response.Close();
@@ -1159,7 +1159,7 @@ namespace Owid.Client.Test
                     verifying[i] = Task.Factory.StartNew(() =>
                     {
                         start.SignalAndWait();
-                        return owid.VerifyAtAsync(endPoint, Array.Empty<Model.Owid>(), default)
+                        return owid.VerifyAtAsync(endPoint, default)
                             .GetAwaiter().GetResult();
                     }, TaskCreationOptions.LongRunning);
                 }

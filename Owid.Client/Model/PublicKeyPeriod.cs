@@ -61,18 +61,33 @@ namespace Owid.Client.Model
     }
 
     /// <summary>
-    /// The JSON body of the public key end point. It carries the key together
-    /// with the moments it is valid from and to, in UTC, so a client holds
-    /// the key for the whole span from one answer rather than asking again
-    /// for every minute. The PEM alone as text is not a valid answer.
+    /// The JSON body of the public key end point. It carries the key, the
+    /// encoding the key is in, and the moments it is valid from and to, in
+    /// UTC, so a client holds the key for the whole span from one answer
+    /// rather than asking again for every minute. The PEM alone as text is
+    /// not a valid answer.
     /// </summary>
     public class PublicKeyResponse
     {
         /// <summary>
-        /// The public key in PEM form.
+        /// The one encoding of the key this library reads and writes, a
+        /// Subject Public Key Info PEM.
         /// </summary>
-        [JsonPropertyName("publicKeySPKI")]
-        public string PublicKeySPKI { get; set; } = string.Empty;
+        public const string SpkiFormat = "spki";
+
+        /// <summary>
+        /// The encoding of <see cref="PublicKey"/>, which is the value the
+        /// request asked for. A request that asks for no format is answered
+        /// in this one.
+        /// </summary>
+        [JsonPropertyName("format")]
+        public string Format { get; set; } = SpkiFormat;
+
+        /// <summary>
+        /// The public key in the encoding <see cref="Format"/> names.
+        /// </summary>
+        [JsonPropertyName("publicKey")]
+        public string PublicKey { get; set; } = string.Empty;
 
         /// <summary>
         /// The UTC moment the key came into force, or null where the creator
@@ -107,7 +122,7 @@ namespace Owid.Client.Model
             PublicKeyPeriod? period,
             uint askedMinutes)
         {
-            var response = new PublicKeyResponse { PublicKeySPKI = publicKey };
+            var response = new PublicKeyResponse { PublicKey = publicKey };
             if (period != null)
             {
                 response.ValidFrom = Constants.BaseDate.AddMinutes(period.StartsAt);
@@ -122,8 +137,9 @@ namespace Owid.Client.Model
 
         /// <summary>
         /// Checks the answer the way both the creator that sends it and the
-        /// client that reads it must. The key must be a public key this
-        /// library can read, a key valid to a moment must be valid from an
+        /// client that reads it must. The format must be the one this
+        /// library reads and the key must be a public key in it, a key valid
+        /// to a moment must be valid from an
         /// earlier one, and where the moment asked about is known the key
         /// must have come into force by then and, if it has an end, not have
         /// ended. A creator that fails this check has a fault in its schedule
@@ -136,7 +152,12 @@ namespace Owid.Client.Model
         /// </exception>
         public void Validate(DateTime? asked)
         {
-            if (string.IsNullOrWhiteSpace(PublicKeySPKI))
+            if (Format != SpkiFormat)
+            {
+                throw new InvalidOperationException(
+                    "the public key answer states a format this library does not read");
+            }
+            if (string.IsNullOrWhiteSpace(PublicKey))
             {
                 throw new InvalidOperationException(
                     "the public key answer holds no key");
@@ -144,7 +165,7 @@ namespace Owid.Client.Model
             try
             {
                 using var key = System.Security.Cryptography.ECDsa.Create();
-                key.ImportFromPem(PublicKeySPKI);
+                key.ImportFromPem(PublicKey);
             }
             catch (Exception e)
             {

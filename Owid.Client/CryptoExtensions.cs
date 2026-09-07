@@ -246,7 +246,9 @@ namespace Owid.Client
 			this Model.Owid owid,
 			CancellationToken cancellationToken = default)
 		{
-			return owid.VerifyAsync(Constants.Empty, cancellationToken);
+			return owid.VerifyAtAsync(
+				KeyEndPointFor(owid, "https"),
+				cancellationToken);
 		}
 
         /// <summary>
@@ -255,50 +257,14 @@ namespace Owid.Client
         /// <param name="owid"></param>
         /// <param name="crypto"></param>
         /// <returns></returns>
-        public static async Task<bool> VerifyAsync(
+        public static Task<bool> VerifyAsync(
 			this Model.Owid owid,
 			ECDsa crypto)
         {
-			return await owid.VerifyAsyncWithOthers(crypto, Constants.Empty);
-		}
-
-        /// <summary>
-        /// Verify that <see cref="Owid"/> signature is correct over the
-        /// others it was signed with, fetching the public key from the
-        /// creator's domain over HTTPS.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <param name="others"></param>
-        /// <param name="cancellationToken">
-        /// Ends this caller's wait for the key. See
-        /// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
-        /// that does and does not cancel.
-        /// </param>
-        /// <returns></returns>
-        public static async Task<bool> VerifyAsync(
-			this Model.Owid owid,
-			Model.Owid[] others,
-			CancellationToken cancellationToken = default)
-		{
-			return await owid.VerifyAtAsync(
-				KeyEndPointFor(owid, "https"),
-				others,
-				cancellationToken).ConfigureAwait(false);
-		}
-
-        /// <summary>
-        /// Verify that <see cref="Owid"/> signature is correct.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <param name="crypto"></param>
-        /// <param name="others"></param>
-        /// <returns></returns>
-        public static async Task<bool> VerifyAsync(
-			this Model.Owid owid,
-			ECDsa crypto,
-			params Model.Owid[] others)
-        {
-			return await owid.VerifyAsyncWithOthers(crypto, others);
+			// Completes synchronously. Verification is a short CPU-bound
+			// operation, so queuing it to the thread pool would cost a
+			// thread and a hop for nothing.
+			return Task.FromResult(owid.Verify(crypto));
 		}
 
         /// <summary>
@@ -314,8 +280,7 @@ namespace Owid.Client
         /// </remarks>
         public static OwidSignatureStatus SignatureStatus(
             this Model.Owid owid,
-            ECDsa crypto,
-            params Model.Owid[] others)
+            ECDsa crypto)
         {
             if (owid == null)
             {
@@ -331,7 +296,7 @@ namespace Owid.Client
             }
             try
             {
-                return owid.Verify(crypto, others)
+                return owid.Verify(crypto)
                     ? OwidSignatureStatus.SignatureValid
                     : OwidSignatureStatus.SignatureInvalid;
             }
@@ -348,8 +313,7 @@ namespace Owid.Client
         /// </summary>
         public static OwidSignatureStatus SignatureStatus(
             this Model.Owid owid,
-            string publicKeyPem,
-            params Model.Owid[] others)
+            string publicKeyPem)
         {
             if (string.IsNullOrEmpty(publicKeyPem))
             {
@@ -372,7 +336,7 @@ namespace Owid.Client
             }
             using (crypto)
             {
-                return owid.SignatureStatus(crypto, others);
+                return owid.SignatureStatus(crypto);
             }
         }
 
@@ -384,74 +348,17 @@ namespace Owid.Client
         /// </summary>
         /// <param name="owid"></param>
         /// <param name="crypto"></param>
-        /// <param name="others"></param>
         /// <returns></returns>
         public static bool Verify(
 			this Model.Owid owid,
-			ECDsa crypto,
-			params Model.Owid[] others)
+			ECDsa crypto)
 		{
-			var data = owid.GetDataForCrypto(others ?? Constants.Empty);
+			var data = owid.GetSignedBytes();
 			return crypto.VerifyData(
 				data,
 				owid.Signature,
 				HashAlgorithmName.SHA256);
 		}
-
-        /// <summary>
-        /// Verify that <see cref="Owid"/> signature is correct.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <param name="crypto"></param>
-        /// <param name="others"></param>
-        /// <returns></returns>
-        public static Task<bool> VerifyAsyncWithOthers(
-			this Model.Owid owid,
-			ECDsa crypto,
-			Model.Owid[] others)
-		{
-			// Completes synchronously. The previous implementation queued
-			// the check to the thread pool with Task.Run, which cost a pool
-			// thread and a hop for a sub-millisecond CPU-bound operation,
-			// and callers that block on the result then held two threads
-			// per verification.
-			return Task.FromResult(owid.Verify(crypto, others));
-		}
-
-		/// <summary>
-		/// Adds the fields from this OWID to the byte buffer without the 
-		/// signature. Adds all the bytes of the others to the data.
-		/// </summary>
-		/// <param name="owid"></param>
-		/// <param name="others"></param>
-		/// <returns></returns>
-		internal static byte[] GetDataForCrypto(
-			this Model.Owid owid,
-			Model.Owid[] others)
-        {
-			// With no others the data is exactly the signed bytes, which is
-			// the common case on the verification path.
-			if (others.Length == 0)
-			{
-				return owid.GetSignedBytes();
-			}
-			var size = owid.GetSignedByteCount();
-			foreach (var other in others)
-			{
-				size += other.GetByteCount();
-			}
-			return Extensions.ToExactBuffer(
-				size,
-				(owid, others),
-				static (writer, state) =>
-				{
-					state.owid.ToBufferNoSignature(writer);
-					foreach (var other in state.others)
-					{
-						other.ToBuffer(writer);
-					}
-				});
-        }
 
 		/// <summary>
 		/// The creator's key end point for the OWID over the scheme given,
@@ -479,8 +386,8 @@ namespace Owid.Client
 		private static Uri KeyUriFor(string endPoint, uint? minute)
 		{
 			return new Uri(minute.HasValue
-				? endPoint + "?format=pkcs&date=" + minute.Value
-				: endPoint + "?format=pkcs");
+				? endPoint + "?format=spki&date=" + minute.Value
+				: endPoint + "?format=spki");
 		}
 
 		/// <summary>
@@ -520,11 +427,10 @@ namespace Owid.Client
 		/// other than a key, or whose own statement of the span puts the
 		/// OWID's date outside the key it answered with, leaves the
 		/// signature unjudged and is reported as such rather than as a
-		/// forgery. See <see cref="SignatureStatus(Model.Owid, ECDsa, Model.Owid[])"/>
+		/// forgery. See <see cref="SignatureStatus(Model.Owid, ECDsa)"/>
 		/// for the answers about the signature itself.
 		/// </remarks>
 		/// <param name="owid"></param>
-		/// <param name="others"></param>
 		/// <param name="cancellationToken">
 		/// Ends this caller's wait for the key. See
 		/// <see cref="GetPublicKeyAsync(Uri, CancellationToken)"/> for what
@@ -532,14 +438,12 @@ namespace Owid.Client
 		/// </param>
 		public static async Task<OwidSignatureStatus> SignatureStatusAsync(
 			this Model.Owid owid,
-			Model.Owid[] others,
 			CancellationToken cancellationToken = default)
 		{
 			try
 			{
 				return await owid.SignatureStatusAtAsync(
 					KeyEndPointFor(owid, "https"),
-					others,
 					cancellationToken).ConfigureAwait(false);
 			}
 			catch (HttpRequestException)
@@ -553,19 +457,6 @@ namespace Owid.Client
 			{
 				return OwidSignatureStatus.InvalidKey;
 			}
-		}
-
-		/// <summary>
-		/// Says whether the signature is genuine using the key the creator's
-		/// domain serves for the OWID's own date, or why that could not be
-		/// decided. See
-		/// <see cref="SignatureStatusAsync(Model.Owid, Model.Owid[], CancellationToken)"/>.
-		/// </summary>
-		public static Task<OwidSignatureStatus> SignatureStatusAsync(
-			this Model.Owid owid,
-			CancellationToken cancellationToken = default)
-		{
-			return owid.SignatureStatusAsync(Constants.Empty, cancellationToken);
 		}
 
 		/// <summary>
@@ -587,11 +478,10 @@ namespace Owid.Client
 		internal static async Task<bool> VerifyAtAsync(
 			this Model.Owid owid,
 			string endPoint,
-			Model.Owid[] others,
 			CancellationToken cancellationToken)
 		{
 			var status = await owid.SignatureStatusAtAsync(
-				endPoint, others, cancellationToken).ConfigureAwait(false);
+				endPoint, cancellationToken).ConfigureAwait(false);
 			if (status == OwidSignatureStatus.KeyUnavailable)
 			{
 				throw new InvalidOperationException(
@@ -612,7 +502,6 @@ namespace Owid.Client
 		internal static async Task<OwidSignatureStatus> SignatureStatusAtAsync(
 			this Model.Owid owid,
 			string endPoint,
-			Model.Owid[] others,
 			CancellationToken cancellationToken)
 		{
 			var minute = MinuteOf(owid);
@@ -621,7 +510,7 @@ namespace Owid.Client
 				cancellationToken).ConfigureAwait(false);
 			using (var crypto = ImportKey(answer.Pem))
 			{
-				var status = owid.SignatureStatus(crypto, others);
+				var status = owid.SignatureStatus(crypto);
 				if (status != OwidSignatureStatus.SignatureInvalid)
 				{
 					return status;
@@ -632,7 +521,7 @@ namespace Owid.Client
 				return OwidSignatureStatus.SignatureInvalid;
 			}
 			if (await NeighbourVerifiesAsync(
-				owid, minute.Value, endPoint, answer, others, cancellationToken)
+				owid, minute.Value, endPoint, answer, cancellationToken)
 				.ConfigureAwait(false))
 			{
 				return OwidSignatureStatus.SignatureValid;
@@ -666,7 +555,6 @@ namespace Owid.Client
 			uint minute,
 			string endPoint,
 			KeyAnswer tried,
-			Model.Owid[] others,
 			CancellationToken cancellationToken)
 		{
 			if (tried.Known == false)
@@ -703,7 +591,7 @@ namespace Owid.Client
 				}
 				using (var crypto = ImportKey(neighbour.Pem))
 				{
-					if (owid.Verify(crypto, others))
+					if (owid.Verify(crypto))
 					{
 						return true;
 					}
@@ -872,7 +760,7 @@ namespace Owid.Client
 			{
 				throw new ArgumentException(e.Message, e);
 			}
-			return (answer.PublicKeySPKI, MinutesOf(answer.ValidFrom), MinutesOf(answer.ValidTo));
+			return (answer.PublicKey, MinutesOf(answer.ValidFrom), MinutesOf(answer.ValidTo));
 		}
 
 		/// <summary>

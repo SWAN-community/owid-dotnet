@@ -238,26 +238,6 @@ of it and the difference only surfaces later, somewhere that is not looking.
 caller was given cannot alter an OWID whose signature covers the original
 bytes.
 
-### Chained sign and verify with others
-
-An OWID can be signed over other OWIDs. Verification then requires the same
-other OWIDs to be supplied in the same order.
-
-```csharp
-var first = creator.Create("first");
-var second = creator.Create("second");
-
-// Create and sign a new OWID over the two others.
-var chained = creator.Create(payload, first, second);
-
-// Verification succeeds only with the same others.
-using (var crypto = ECDsa.Create())
-{
-    crypto.ImportFromPem(publicPem);
-    var valid = await chained.VerifyAsync(crypto, first, second);
-}
-```
-
 ### Serve the public key end point
 
 Add a reference to `Owid.Client.Controllers` and register the configuration so
@@ -304,7 +284,7 @@ builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
 Callers pass the OWID's own date as `?date=<minutes>`, where `date` is the
 number of minutes since `2020-01-01` UTC (the OWID Date encoding):
 
-`GET /owid/api/v3/public-key?date=<minutes>`
+`GET /owid/api/v3/public-key?format=spki&date=<minutes>`
 
 The endpoint returns the key with the latest `StartsAt` on or before `date`,
 the key in force now when `date` is omitted, and `404` when `date` precedes
@@ -314,8 +294,12 @@ published ahead of time and a key that has not started has signed nothing.
 Implement `IPublicKeyStore` to plug in any key source.
 
 The public key end point answers with a `PublicKeyResponse` as JSON, being
-the key as `publicKeySPKI` together with `validFrom` and `validTo`, the UTC
-moments the key came into force and the next key starts. `DatedKeyStore` knows
+the key as `publicKey`, the encoding it is in as `format`, and `validFrom` and
+`validTo`, the UTC moments the key came into force and the next key starts.
+The one format defined is `spki`, a Subject Public Key Info PEM. It is what a
+request without a `format` receives, and a request for any other value is
+answered 400 rather than in an encoding the caller did not ask for.
+`DatedKeyStore` knows
 both, and a store of your own states them by implementing
 `GetPublicKeyPeriod` as well. `validTo` is null for the last key in the
 schedule and both are null for the single configured key. The answer is

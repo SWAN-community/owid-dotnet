@@ -69,9 +69,30 @@ namespace Owid.Client.Test
             using (var controller = new OwidController(Configuration!))
             {
                 var answer = (await controller.GetPublicKey()).Value!;
-                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKeySPKI);
+                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKey);
+                Assert.AreEqual("spki", answer.Format, "the answer names the encoding of the key");
                 Assert.IsNull(answer.ValidFrom, "the configured key has no schedule");
                 Assert.IsNull(answer.ValidTo);
+            }
+        }
+
+        /// <summary>
+        /// The format parameter names the encoding of the key in the
+        /// answer. The one encoding defined is answered whether or not it is
+        /// asked for by name, and any other is refused as a bad request
+        /// rather than answered in an encoding the caller did not ask for.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetPublicKeyFormat()
+        {
+            using (var controller = new OwidController(Configuration!))
+            {
+                var answer = (await controller.GetPublicKey(null, "spki")).Value!;
+                Assert.AreEqual("spki", answer.Format);
+                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKey);
+
+                var refused = (await controller.GetPublicKey(null, "pkcs")).Result;
+                Assert.IsInstanceOfType(refused, typeof(BadRequestObjectResult));
             }
         }
 
@@ -109,7 +130,7 @@ namespace Owid.Client.Test
                     new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
                 var answer = (await controller.GetPublicKey(minutes)).Value!;
-                Assert.AreEqual(oldKey, answer.PublicKeySPKI);
+                Assert.AreEqual(oldKey, answer.PublicKey);
                 Assert.AreEqual(oldStart, answer.ValidFrom!.Value,
                     "the answer states when the old key came into force");
                 Assert.AreEqual(newStart, answer.ValidTo!.Value,
@@ -119,7 +140,7 @@ namespace Owid.Client.Test
                     new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
                 answer = (await controller.GetPublicKey(minutes)).Value!;
-                Assert.AreEqual(newKey, answer.PublicKeySPKI);
+                Assert.AreEqual(newKey, answer.PublicKey);
                 Assert.AreEqual(newStart, answer.ValidFrom!.Value);
                 Assert.IsNull(answer.ValidTo, "the last key of the schedule has no end");
             }
@@ -217,12 +238,12 @@ namespace Owid.Client.Test
             {
                 Assert.AreEqual(
                     inForce,
-                    (await controller.GetPublicKey(nextMonth)).Value!.PublicKeySPKI);
+                    (await controller.GetPublicKey(nextMonth)).Value!.PublicKey);
                 // The largest value the parameter can carry is later than
                 // now as well, so it takes the same answer.
                 Assert.AreEqual(
                     inForce,
-                    (await controller.GetPublicKey(uint.MaxValue)).Value!.PublicKeySPKI);
+                    (await controller.GetPublicKey(uint.MaxValue)).Value!.PublicKey);
             }
         }
 
@@ -262,7 +283,7 @@ namespace Owid.Client.Test
                 };
                 Assert.AreEqual(
                     Configuration!.PublicKey,
-                    (await controller.GetPublicKey()).Value!.PublicKeySPKI);
+                    (await controller.GetPublicKey()).Value!.PublicKey);
             }
         }
 

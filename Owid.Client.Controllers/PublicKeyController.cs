@@ -97,11 +97,16 @@ namespace Owid.Client.Controllers
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
-        /// encoding).
+        /// encoding), being the minute the key is asked for.
+        /// </param>
+        /// <param name="format">
+        /// Optional encoding of the key in the answer. The only value
+        /// defined is spki, which is taken when the parameter is absent, and
+        /// any other value is answered 400.
         /// </param>
         /// <returns>
-        /// The public key answer, or 404 when no key was active at the
-        /// requested date.
+        /// The public key answer, 400 for a format this creator does not
+        /// serve, or 404 when no key was active at the requested date.
         /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -110,12 +115,19 @@ namespace Owid.Client.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public async Task<ActionResult<PublicKeyResponse>> GetPublicKey(uint? date = null)
+        public async Task<ActionResult<PublicKeyResponse>> GetPublicKey(
+            uint? date = null,
+            string? format = null)
         {
             var denied = await AuthorizeAsync();
             if (denied != null)
             {
                 return denied;
+            }
+            if (format != null && format != PublicKeyResponse.SpkiFormat)
+            {
+                return BadRequest(
+                    "the only format defined is " + PublicKeyResponse.SpkiFormat);
             }
             var asked = ClampToNow(date);
             var period = _publicKeyStore.GetPublicKeyPeriod(asked);

@@ -97,35 +97,6 @@
               <paramref name="domain" /> is longer than a domain can be.
             </exception>
         </member>
-        <member name="M:Owid.Client.Creator.Sign(Owid.Client.Model.Owid)">
-            <summary>
-            Sign the OWID provided.
-            </summary>
-            <param name="owid"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.Creator.Sign(Owid.Client.Model.Owid,Owid.Client.Model.Owid[])">
-            <summary>
-            Sign the OWID provided AND the other OWIDs provided.
-            </summary>
-            <param name="owid"></param>
-            <param name="others"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.Creator.SignWithOthers(Owid.Client.Model.Owid,Owid.Client.Model.Owid[])">
-            <summary>
-            Sign the OWID provided AND the other OWIDs provided.
-            </summary>
-            <param name="owid"></param>
-            <param name="others"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.Creator.SignWithOthers(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.DateTime)">
-            <summary>
-            Sign the OWID provided AND the other OWIDs provided, stamping it
-            with the date given rather than the moment of signing.
-            </summary>
-        </member>
         <member name="M:Owid.Client.Creator.Create(System.String)">
             <summary>
             Create a new OWID for the creator containing the value as the 
@@ -142,28 +113,21 @@
             <param name="value">Payload value</param>
             <returns>Signed OWID with payload provided.</returns>
         </member>
-        <member name="M:Owid.Client.Creator.Create(System.Byte[],Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.Creator.Sign(Owid.Client.Model.Owid)">
             <summary>
-            Creates and signs an OWID carrying the value, with the other OWIDs
-            covered by the signature so that a tree can be verified as a whole.
+            Sign the OWID provided, stamping it with the moment of signing.
             </summary>
-            <param name="value">Payload value</param>
-            <param name="others">
-            OWIDs this one is signed alongside.
-            </param>
-            <returns>Signed OWID with the payload provided.</returns>
-            <remarks>
-            This is one of only two ways an OWID reaches calling code, the
-            other being a successful parse. The creator owns the version, the
-            domain, the date and the signature; a caller supplies the payload
-            and nothing else, so there is no moment at which a partly built
-            OWID exists for anyone to hold or pass on.
-            </remarks>
         </member>
-        <member name="M:Owid.Client.Creator.Create(System.Byte[],System.DateTime,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.Creator.Sign(Owid.Client.Model.Owid,System.DateTime)">
             <summary>
-            Creates and signs an OWID carrying the value and the date, with
-            the other OWIDs covered by the signature.
+            Sign the OWID provided, stamping it with the date given rather
+            than the moment of signing. The signature covers the OWID's own
+            bytes without the signature field and nothing else.
+            </summary>
+        </member>
+        <member name="M:Owid.Client.Creator.Create(System.Byte[],System.DateTime)">
+            <summary>
+            Creates and signs an OWID carrying the value and the date.
             </summary>
             <param name="value">Payload value</param>
             <param name="date">
@@ -174,9 +138,6 @@
             Converted to UTC, and truncated to the whole minute the wire
             format carries, so the OWID in hand states exactly what its bytes
             state.
-            </param>
-            <param name="others">
-            OWIDs this one is signed alongside.
             </param>
             <returns>Signed OWID with the payload and date provided.</returns>
             <exception cref="T:System.ArgumentOutOfRangeException">
@@ -389,31 +350,7 @@
             <param name="crypto"></param>
             <returns></returns>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
-            <summary>
-            Verify that <see cref="N:Owid"/> signature is correct over the
-            others it was signed with, fetching the public key from the
-            creator's domain over HTTPS.
-            </summary>
-            <param name="owid"></param>
-            <param name="others"></param>
-            <param name="cancellationToken">
-            Ends this caller's wait for the key. See
-            <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
-            that does and does not cancel.
-            </param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsync(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
-            <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
-            </summary>
-            <param name="owid"></param>
-            <param name="crypto"></param>
-            <param name="others"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa)">
             <summary>
             Says whether the signature is genuine, or why that could not be
             decided.
@@ -426,13 +363,13 @@
             reject good identifiers during an outage. 
             </remarks>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.String)">
             <summary>
             Says whether the signature is genuine using the public key in PEM
             form, or why that could not be decided.
             </summary>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.Verify(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
+        <member name="M:Owid.Client.CryptoExtensions.Verify(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa)">
             <summary>
             Verify that <see cref="N:Owid"/> signature is correct without any
             asynchronous machinery. Verification is a short CPU-bound
@@ -441,25 +378,6 @@
             </summary>
             <param name="owid"></param>
             <param name="crypto"></param>
-            <param name="others"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAsyncWithOthers(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])">
-            <summary>
-            Verify that <see cref="N:Owid"/> signature is correct.
-            </summary>
-            <param name="owid"></param>
-            <param name="crypto"></param>
-            <param name="others"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Owid.Client.CryptoExtensions.GetDataForCrypto(Owid.Client.Model.Owid,Owid.Client.Model.Owid[])">
-            <summary>
-            Adds the fields from this OWID to the byte buffer without the 
-            signature. Adds all the bytes of the others to the data.
-            </summary>
-            <param name="owid"></param>
-            <param name="others"></param>
             <returns></returns>
         </member>
         <member name="M:Owid.Client.CryptoExtensions.KeyEndPointFor(Owid.Client.Model.Owid,System.String)">
@@ -491,7 +409,7 @@
             The ECDsa provider for the key in PEM form.
             </summary>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
             <summary>
             Says whether the signature is genuine using the key the creator's
             domain serves for the OWID's own date, or why that could not be
@@ -502,26 +420,17 @@
             other than a key, or whose own statement of the span puts the
             OWID's date outside the key it answered with, leaves the
             signature unjudged and is reported as such rather than as a
-            forgery. See <see cref="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa,Owid.Client.Model.Owid[])"/>
+            forgery. See <see cref="M:Owid.Client.CryptoExtensions.SignatureStatus(Owid.Client.Model.Owid,System.Security.Cryptography.ECDsa)"/>
             for the answers about the signature itself.
             </remarks>
             <param name="owid"></param>
-            <param name="others"></param>
             <param name="cancellationToken">
             Ends this caller's wait for the key. See
             <see cref="M:Owid.Client.CryptoExtensions.GetPublicKeyAsync(System.Uri,System.Threading.CancellationToken)"/> for what
             that does and does not cancel.
             </param>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,System.Threading.CancellationToken)">
-            <summary>
-            Says whether the signature is genuine using the key the creator's
-            domain serves for the OWID's own date, or why that could not be
-            decided. See
-            <see cref="M:Owid.Client.CryptoExtensions.SignatureStatusAsync(Owid.Client.Model.Owid,Owid.Client.Model.Owid[],System.Threading.CancellationToken)"/>.
-            </summary>
-        </member>
-        <member name="M:Owid.Client.CryptoExtensions.VerifyAtAsync(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+        <member name="M:Owid.Client.CryptoExtensions.VerifyAtAsync(Owid.Client.Model.Owid,System.String,System.Threading.CancellationToken)">
             <summary>
             Verify the OWID against the key its creator's end point serves
             for the OWID's own date, trying the neighbouring key where the
@@ -539,7 +448,7 @@
             checked and false would have read as a forgery.
             </exception>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAtAsync(Owid.Client.Model.Owid,System.String,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+        <member name="M:Owid.Client.CryptoExtensions.SignatureStatusAtAsync(Owid.Client.Model.Owid,System.String,System.Threading.CancellationToken)">
             <summary>
             The status of the signature under the key the end point serves
             for the OWID's own date, or under the neighbouring key where the
@@ -550,7 +459,7 @@
             unavailable and not that the signature does not match.
             </summary>
         </member>
-        <member name="M:Owid.Client.CryptoExtensions.NeighbourVerifiesAsync(Owid.Client.Model.Owid,System.UInt32,System.String,Owid.Client.CryptoExtensions.KeyAnswer,Owid.Client.Model.Owid[],System.Threading.CancellationToken)">
+        <member name="M:Owid.Client.CryptoExtensions.NeighbourVerifiesAsync(Owid.Client.Model.Owid,System.UInt32,System.String,Owid.Client.CryptoExtensions.KeyAnswer,System.Threading.CancellationToken)">
             <summary>
             Whether a key neighbouring the one the OWID's own minute selected
             verifies the signature instead.
@@ -1403,15 +1312,29 @@
         </member>
         <member name="T:Owid.Client.Model.PublicKeyResponse">
             <summary>
-            The JSON body of the public key end point. It carries the key together
-            with the moments it is valid from and to, in UTC, so a client holds
-            the key for the whole span from one answer rather than asking again
-            for every minute. The PEM alone as text is not a valid answer.
+            The JSON body of the public key end point. It carries the key, the
+            encoding the key is in, and the moments it is valid from and to, in
+            UTC, so a client holds the key for the whole span from one answer
+            rather than asking again for every minute. The PEM alone as text is
+            not a valid answer.
             </summary>
         </member>
-        <member name="P:Owid.Client.Model.PublicKeyResponse.PublicKeySPKI">
+        <member name="F:Owid.Client.Model.PublicKeyResponse.SpkiFormat">
             <summary>
-            The public key in PEM form.
+            The one encoding of the key this library reads and writes, a
+            Subject Public Key Info PEM.
+            </summary>
+        </member>
+        <member name="P:Owid.Client.Model.PublicKeyResponse.Format">
+            <summary>
+            The encoding of <see cref="P:Owid.Client.Model.PublicKeyResponse.PublicKey"/>, which is the value the
+            request asked for. A request that asks for no format is answered
+            in this one.
+            </summary>
+        </member>
+        <member name="P:Owid.Client.Model.PublicKeyResponse.PublicKey">
+            <summary>
+            The public key in the encoding <see cref="P:Owid.Client.Model.PublicKeyResponse.Format"/> names.
             </summary>
         </member>
         <member name="P:Owid.Client.Model.PublicKeyResponse.ValidFrom">
@@ -1445,8 +1368,9 @@
         <member name="M:Owid.Client.Model.PublicKeyResponse.Validate(System.Nullable{System.DateTime})">
             <summary>
             Checks the answer the way both the creator that sends it and the
-            client that reads it must. The key must be a public key this
-            library can read, a key valid to a moment must be valid from an
+            client that reads it must. The format must be the one this
+            library reads and the key must be a public key in it, a key valid
+            to a moment must be valid from an
             earlier one, and where the moment asked about is known the key
             must have come into force by then and, if it has an end, not have
             ended. A creator that fails this check has a fault in its schedule

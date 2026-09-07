@@ -16,16 +16,15 @@ concepts behind this implementation.
 
 This repository contains a full .NET client for OWID. It can create, sign and
 verify OWIDs, and serialize them to and from byte arrays and Base64 strings.
-It also provides an ASP.NET Core controller which serves the public key and
-creator endpoints that other parties use when verifying OWIDs from your
-domain.
+It also provides an ASP.NET Core controller which serves the public key end
+point that other parties use when verifying OWIDs from your domain.
 
 The solution contains three projects.
 
 | Project | Purpose |
 |---|---|
 | `Owid.Client` | Core model, creation, signing, verification and serialization. |
-| `Owid.Client.Controllers` | ASP.NET Core controller for the public key and creator endpoints. |
+| `Owid.Client.Controllers` | ASP.NET Core controller for the public key end point. |
 | `Owid.Client.Test` | MSTest unit tests. |
 
 ## Payload size and application limits
@@ -126,9 +125,44 @@ using (var crypto = ECDsa.Create())
     var valid = await owid!.VerifyAsync(crypto);
 }
 
-// Or verify by fetching the public key from the creator's domain.
-var validFromDomain = await owid!.VerifyAsync();
+// Or verify by fetching the public key from the creator's domain. The fetch
+// is asynchronous, with no synchronous form, and takes an optional
+// cancellation token that ends this caller's wait for the key.
+var validFromDomain = await owid!.VerifyAsync(cancellationToken);
+
+// Or ask why, with the key fetched the same way. KeyUnavailable covers a
+// creator that could not be reached and one whose own statement puts the
+// OWID's date outside the span of the key it answered with.
+var statusFromDomain = await owid!.SignatureStatusAsync(cancellationToken);
 ```
+
+Keys fetched from a creator are held in memory. The request names the minute
+the OWID was created, so a creator that rotates its key answers with the key in
+force then, and the answer is the JSON form, which carries the moments the key
+is valid from and to as well as the key. A creator built on this library states
+both, so the whole span is held from one answer and an OWID dated anywhere in
+it is verified without a request whatever the clock drift. An answer that
+states the start alone is held from the start up to fifteen minutes behind now,
+because no later key can have started before then. An answer that states no
+span comes from a creator with one key and no schedule, and is held against the
+minute asked about and every minute between two such answers for the same key,
+but never for a minute within fifteen minutes of now, because a creator whose
+clock differs from this one's may have read that minute as its present rather
+than as the minute named. The PEM alone as text is not a valid answer and is
+refused. A signature that does not verify under the key selected, where the
+OWID is dated within fifteen minutes of an edge of the span the creator stated
+for that key, is checked against the key for the minute just beyond that edge
+before it is reported as not matching, because a creator's signing machines may
+not agree with its schedule to the minute. Where the creator's own statement
+puts the OWID's date outside the span of the key it answered with and nothing
+verifies, the key is reported as unavailable rather than the signature as not
+matching, because a key that was not in force proves nothing about the
+identifier. Live identifiers from a creator that states its spans cost one
+request per key, and older ones cost none. At most 1024 keys are held across
+every creator before the cache is emptied and filled again, and
+`ClearPublicKeyCache` empties it on demand, which is how a long running process
+drops a key it has learned it should no longer trust. Callers arriving together
+for one key share one request, and a request that fails is not held.
 
 ### Read an OWID, and what a failure means
 
@@ -204,27 +238,7 @@ of it and the difference only surfaces later, somewhere that is not looking.
 caller was given cannot alter an OWID whose signature covers the original
 bytes.
 
-### Chained sign and verify with others
-
-An OWID can be signed over other OWIDs. Verification then requires the same
-other OWIDs to be supplied in the same order.
-
-```csharp
-var first = creator.Create("first");
-var second = creator.Create("second");
-
-// Create and sign a new OWID over the two others.
-var chained = creator.Create(payload, first, second);
-
-// Verification succeeds only with the same others.
-using (var crypto = ECDsa.Create())
-{
-    crypto.ImportFromPem(publicPem);
-    var valid = await chained.VerifyAsync(crypto, first, second);
-}
-```
-
-### Serve the public key and creator endpoints
+### Serve the public key end point
 
 Add a reference to `Owid.Client.Controllers` and register the configuration so
 that `OwidController` is available to the ASP.NET Core pipeline.
@@ -247,8 +261,8 @@ app.Run();
 ```
 
 The controller then responds to `/owid/api/v1/public-key`,
-`/owid/api/v2/public-key`, `/owid/api/v3/public-key` and the equivalent
-`creator` paths. Use the v3 paths for new integrations; v1 and v2 remain for
+`/owid/api/v2/public-key` and `/owid/api/v3/public-key`. Use the v3 path for
+new integrations. v1 and v2 remain for
 backwards compatibility.
 
 ### Historical keys (rotating signing keys)
@@ -270,7 +284,7 @@ builder.Services.AddSingleton<IPublicKeyStore>(new DatedKeyStore(new[]
 Callers pass the OWID's own date as `?date=<minutes>`, where `date` is the
 number of minutes since `2020-01-01` UTC (the OWID Date encoding):
 
-`GET /owid/api/v3/public-key?date=<minutes>`
+`GET /owid/api/v3/public-key?format=spki&date=<minutes>`
 
 The endpoint returns the key with the latest `StartsAt` on or before `date`,
 the key in force now when `date` is omitted, and `404` when `date` precedes
@@ -278,6 +292,21 @@ the oldest known key or when no key is in force at all. A `date` later than
 the moment of the request is read as that moment, because a schedule is
 published ahead of time and a key that has not started has signed nothing.
 Implement `IPublicKeyStore` to plug in any key source.
+
+The public key end point answers with a `PublicKeyResponse` as JSON, being
+the key as `publicKey`, the encoding it is in as `format`, and `validFrom` and
+`validTo`, the UTC moments the key came into force and the next key starts.
+The one format defined is `spki`, a Subject Public Key Info PEM. It is what a
+request without a `format` receives, and a request for any other value is
+answered 400 rather than in an encoding the caller did not ask for.
+`DatedKeyStore` knows
+both, and a store of your own states them by implementing
+`GetPublicKeyPeriod` as well. `validTo` is null for the last key in the
+schedule and both are null for the single configured key. The answer is
+checked with `PublicKeyResponse.Validate` before it is sent, so a key that
+cannot be read or a schedule that contradicts itself is a server error rather
+than a bad answer. The PEM alone as text is no longer a valid answer, and a
+client that receives it refuses it.
 
 `StartsAt` is the schedule position and not the moment the key material was
 generated. The two only agree whilst keys are generated one period at a time,
@@ -291,9 +320,9 @@ than the last entry of a schedule written ahead of time.
 ### Requiring authentication (optional)
 
 The OWID specification leaves authentication to the implementor: a creator
-MAY require a credential on the public-key and creator endpoints, for
-example to tie key access to a subscription. Register an `IOwidAuthorizer`
-to enforce your own rule; without one the endpoints stay open. The check is
+MAY require a credential on the public-key end point, for example to tie key
+access to a subscription. Register an `IOwidAuthorizer` to enforce your own
+rule. Without one the end point stays open. The check is
 async so it can call a database or another service.
 
 ```csharp

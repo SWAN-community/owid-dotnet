@@ -68,66 +68,44 @@ namespace Owid.Client.Test
         {
             using (var controller = new OwidController(Configuration!))
             {
-                Assert.AreEqual(
-                    Configuration!.PublicKey,
-                    (await controller.GetPublicKey()).Value);
+                var answer = (await controller.GetPublicKey()).Value!;
+                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKey);
+                Assert.AreEqual("spki", answer.Format, "the answer names the encoding of the key");
+                Assert.IsNull(answer.ValidFrom, "the configured key has no schedule");
+                Assert.IsNull(answer.ValidTo);
             }
         }
 
         /// <summary>
-        /// Test that the creator endpoint returns the configured domain. The
-        /// current implementation returns the domain string only rather than
-        /// a JSON document.
+        /// The format parameter names the encoding of the key in the
+        /// answer. The one encoding defined is answered whether or not it is
+        /// asked for by name, and any other is refused as a bad request
+        /// rather than answered in an encoding the caller did not ask for.
         /// </summary>
         [TestMethod]
-        public async Task TestGetCreatorReturnsConfiguredDomain()
+        public async Task TestGetPublicKeyFormat()
         {
             using (var controller = new OwidController(Configuration!))
             {
-                var creator = (await controller.GetCreator()).Value;
-                Assert.AreEqual(Configuration!.Domain, creator!.Domain);
-                Assert.AreEqual(Configuration!.PublicKey, creator!.PublicKeySPKI);
+                var answer = (await controller.GetPublicKey(null, "spki")).Value!;
+                Assert.AreEqual("spki", answer.Format);
+                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKey);
+
+                var refused = (await controller.GetPublicKey(null, "pkcs")).Result;
+                Assert.IsInstanceOfType(refused, typeof(BadRequestObjectResult));
             }
         }
 
         /// <summary>
-        /// A supplied date selects the creator's key through the store, so the
-        /// creator and public-key endpoints agree.
+        /// The public key of a newly made key pair, in PEM form, for a store
+        /// whose answer has to pass the checks a creator applies before
+        /// sending it.
         /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorWithDateUsesStore()
+        private static string FreshPem()
         {
-            var store = new DatedKeyStore(new[]
-            {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
-            });
-            using (var controller = new OwidController(Configuration!, store))
-            {
-                var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                var minutes = (uint)(
-                    new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
-                    .TotalMinutes;
-                var creator = (await controller.GetCreator(minutes)).Value;
-                Assert.AreEqual("old", creator!.PublicKeySPKI);
-            }
-        }
-
-        /// <summary>
-        /// A date before any known key produces a 404 on the creator endpoint.
-        /// </summary>
-        [TestMethod]
-        public async Task TestGetCreatorDateBeforeOldestReturns404()
-        {
-            var store = new DatedKeyStore(new[]
-            {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "k" },
-            });
-            using (var controller = new OwidController(Configuration!, store))
-            {
-                var result = await controller.GetCreator(1440);
-                Assert.IsInstanceOfType(result.Result, typeof(NotFoundResult));
-            }
+            using var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            return new String(PemEncoding.Write(
+                "PUBLIC KEY", crypto.ExportSubjectPublicKeyInfo()));
         }
 
         /// <summary>
@@ -136,10 +114,14 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestGetPublicKeyWithDateUsesStore()
         {
+            var oldKey = FreshPem();
+            var newKey = FreshPem();
+            var oldStart = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+            var newStart = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc);
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = oldStart, PublicKey = oldKey },
+                new DatedPublicKey { StartsAt = newStart, PublicKey = newKey },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -147,8 +129,40 @@ namespace Owid.Client.Test
                 var minutes = (uint)(
                     new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
-                Assert.AreEqual(
-                    "old", (await controller.GetPublicKey(minutes)).Value);
+                var answer = (await controller.GetPublicKey(minutes)).Value!;
+                Assert.AreEqual(oldKey, answer.PublicKey);
+                Assert.AreEqual(oldStart, answer.ValidFrom!.Value,
+                    "the answer states when the old key came into force");
+                Assert.AreEqual(newStart, answer.ValidTo!.Value,
+                    "and when the new key takes over");
+
+                minutes = (uint)(
+                    new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc) - epoch)
+                    .TotalMinutes;
+                answer = (await controller.GetPublicKey(minutes)).Value!;
+                Assert.AreEqual(newKey, answer.PublicKey);
+                Assert.AreEqual(newStart, answer.ValidFrom!.Value);
+                Assert.IsNull(answer.ValidTo, "the last key of the schedule has no end");
+            }
+        }
+
+        /// <summary>
+        /// A store holding something that is not a public key, or a schedule
+        /// that contradicts itself, is a server error rather than an answer
+        /// a client would then have to refuse.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetPublicKeyRefusesAnAnswerAClientWouldRefuse()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "not a key" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var result = (await controller.GetPublicKey()).Result as ObjectResult;
+                Assert.IsNotNull(result, "a key that cannot be read is answered with a status");
+                Assert.AreEqual(StatusCodes.Status500InternalServerError, result!.StatusCode);
             }
         }
 
@@ -171,13 +185,13 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// An undated request when no key has started yet is a 404 on both
-        /// end points, never a success with no key in it. A schedule is
-        /// published ahead of time, so this is an ordinary state for a
-        /// creator whose first period has not begun.
+        /// An undated request when no key has started yet is a 404, never a
+        /// success with no key in it. A schedule is published ahead of time,
+        /// so this is an ordinary state for a creator whose first period has
+        /// not begun.
         /// </summary>
         [TestMethod]
-        public async Task TestNothingInForceYetReturns404OnBothEndPoints()
+        public async Task TestNothingInForceYetReturns404()
         {
             var store = new DatedKeyStore(new[]
             {
@@ -192,9 +206,6 @@ namespace Owid.Client.Test
                 Assert.IsInstanceOfType(
                     (await controller.GetPublicKey()).Result,
                     typeof(NotFoundResult));
-                Assert.IsInstanceOfType(
-                    (await controller.GetCreator()).Result,
-                    typeof(NotFoundResult));
             }
         }
 
@@ -204,20 +215,21 @@ namespace Owid.Client.Test
         /// out. This is what the 51Degrees cloud does with the same request.
         /// </summary>
         [TestMethod]
-        public async Task TestFutureDateIsReadAsNowOnBothEndPoints()
+        public async Task TestFutureDateIsReadAsNow()
         {
             var now = DateTime.UtcNow;
+            var inForce = FreshPem();
             var store = new DatedKeyStore(new[]
             {
                 new DatedPublicKey
                 {
                     StartsAt = now.AddDays(-7),
-                    PublicKey = "in-force",
+                    PublicKey = inForce,
                 },
                 new DatedPublicKey
                 {
                     StartsAt = now.AddDays(7),
-                    PublicKey = "not-started",
+                    PublicKey = FreshPem(),
                 },
             });
             var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -225,21 +237,18 @@ namespace Owid.Client.Test
             using (var controller = new OwidController(Configuration!, store))
             {
                 Assert.AreEqual(
-                    "in-force",
-                    (await controller.GetPublicKey(nextMonth)).Value);
-                Assert.AreEqual(
-                    "in-force",
-                    (await controller.GetCreator(nextMonth)).Value!.PublicKeySPKI);
+                    inForce,
+                    (await controller.GetPublicKey(nextMonth)).Value!.PublicKey);
                 // The largest value the parameter can carry is later than
                 // now as well, so it takes the same answer.
                 Assert.AreEqual(
-                    "in-force",
-                    (await controller.GetPublicKey(uint.MaxValue)).Value);
+                    inForce,
+                    (await controller.GetPublicKey(uint.MaxValue)).Value!.PublicKey);
             }
         }
 
         /// <summary>
-        /// A denying authorizer's result is returned from both endpoints.
+        /// A denying authorizer's result is returned from the end point.
         /// </summary>
         [TestMethod]
         public async Task TestAuthorizerDeniedResultIsReturned()
@@ -255,9 +264,6 @@ namespace Owid.Client.Test
                 Assert.IsInstanceOfType(
                     (await controller.GetPublicKey()).Result,
                     typeof(UnauthorizedResult));
-                Assert.IsInstanceOfType(
-                    (await controller.GetCreator()).Result,
-                    typeof(UnauthorizedResult));
             }
         }
 
@@ -265,7 +271,7 @@ namespace Owid.Client.Test
         /// An authorizer that returns null lets the request through.
         /// </summary>
         [TestMethod]
-        public async Task TestAuthorizerAllowingRequestReturnsValues()
+        public async Task TestAuthorizerAllowingRequestReturnsTheKey()
         {
             var authorizer = new StubAuthorizer(null);
             using (var controller = new OwidController(
@@ -277,10 +283,7 @@ namespace Owid.Client.Test
                 };
                 Assert.AreEqual(
                     Configuration!.PublicKey,
-                    (await controller.GetPublicKey()).Value);
-                Assert.AreEqual(
-                    Configuration!.Domain,
-                    (await controller.GetCreator()).Value!.Domain);
+                    (await controller.GetPublicKey()).Value!.PublicKey);
             }
         }
 

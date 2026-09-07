@@ -67,21 +67,6 @@ namespace Owid.Client.Test
             "E5n9a81pTsn/Kvi74Azzx4s=";
 
         /// <summary>
-        /// Rust fixture signed over <see cref="RustChainRoot"/> as another
-        /// OWID in a chain.
-        /// </summary>
-        private const string RustChainParty =
-            "A3J1c3Quc3dhbi1kZW1vLnVrAD69MwAFAAAAcGFydHmJ7qaxWgIZUHmGOQb2xC+R" +
-            "uZNwrkMmo1SA9/MfI4SoEpRYdnteXAKUQXxTOK3lmQ3Qz3UwBB6gBb3Q8hi1Wx0R";
-
-        /// <summary>
-        /// Rust fixture forming the root of the chain.
-        /// </summary>
-        private const string RustChainRoot =
-            "A3J1c3Quc3dhbi1kZW1vLnVrAD69MwAEAAAAcm9vdFd0+QLaBLGPyBrQO+VNunBI" +
-            "QZzw8/lhEiDOKTx36Dc93A0n0fzPDMt/C+BdWMqhnL4nVvyurb3IHR7DUAmgmO0=";
-
-        /// <summary>
         /// Public key used to sign the Go fixtures.
         /// </summary>
         private const string GoPublicPem =
@@ -106,21 +91,6 @@ namespace Owid.Client.Test
             "GSM8hYZEfYjJtViG+tA+";
 
         /// <summary>
-        /// Go fixture signed over <see cref="GoChainRoot"/> as another OWID
-        /// in a chain.
-        /// </summary>
-        private const string GoChainParty =
-            "A2dvLnN3YW4tZGVtby51awA/vTMABQAAAHBhcnR5l7NyNmFw2lxqc4DKJWoq0UVd" +
-            "5ujGV/+fvVxqYTRlwCFxaSuwvnhLQQHjX5spxWb4O08IeuiuGCat1WFB/Wqlyw==";
-
-        /// <summary>
-        /// Go fixture forming the root of the chain.
-        /// </summary>
-        private const string GoChainRoot =
-            "A2dvLnN3YW4tZGVtby51awA/vTMABAAAAHJvb3R/bEqzG8gAy9yTF1UMEtOlYXBB" +
-            "mn3a20jxXq5NmxIC8iuZvduOXKMf+K8VoAapkWwfpoDKQHS09IhljasZqC0k";
-
-        /// <summary>
         /// Test that the simple Rust fixture verifies with the Rust public
         /// key.
         /// </summary>
@@ -141,32 +111,6 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// Test that the Rust chain party verifies when the root is supplied
-        /// as others, and that the root verifies on its own.
-        /// </summary>
-        [TestMethod]
-        public async Task TestInteropRustChainVerifiesWithRoot()
-        {
-            await AssertChainVerifiesAsync(
-                RustPublicPem, RustChainParty, RustChainRoot);
-        }
-
-        /// <summary>
-        /// Test that the Rust chain party fails verification when the root
-        /// is not supplied as others.
-        /// </summary>
-        [TestMethod]
-        public async Task TestInteropRustChainFailsWithoutRoot()
-        {
-            var party = TestOwid.Parse(RustChainParty);
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(RustPublicPem);
-                Assert.IsFalse(await party.VerifyAsync(crypto));
-            }
-        }
-
-        /// <summary>
         /// Test that each Rust fixture fails verification after the final
         /// signature byte is flipped.
         /// </summary>
@@ -175,14 +119,6 @@ namespace Owid.Client.Test
         {
             await AssertTamperedFailsAsync(RustPublicPem, RustSimple);
             await AssertTamperedFailsAsync(RustPublicPem, RustUtf8);
-            await AssertTamperedFailsAsync(RustPublicPem, RustChainRoot);
-
-            // The chain party is verified with the genuine root as others so
-            // the failure is caused by the tampering alone.
-            await AssertTamperedFailsAsync(
-                RustPublicPem,
-                RustChainParty,
-                TestOwid.Parse(RustChainRoot));
         }
 
         /// <summary>
@@ -202,8 +138,7 @@ namespace Owid.Client.Test
         [TestMethod]
         public void TestInteropRustSerializationRoundtrip()
         {
-            AssertRoundtrip(
-                RustSimple, RustUtf8, RustChainParty, RustChainRoot);
+            AssertRoundtrip(RustSimple, RustUtf8);
         }
 
         /// <summary>
@@ -225,32 +160,6 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// Test that the Go chain party verifies when the root is supplied
-        /// as others, and that the root verifies on its own.
-        /// </summary>
-        [TestMethod]
-        public async Task TestInteropGoChainVerifiesWithRoot()
-        {
-            await AssertChainVerifiesAsync(
-                GoPublicPem, GoChainParty, GoChainRoot);
-        }
-
-        /// <summary>
-        /// Test that the Go chain party fails verification when the root is
-        /// not supplied as others.
-        /// </summary>
-        [TestMethod]
-        public async Task TestInteropGoChainFailsWithoutRoot()
-        {
-            var party = TestOwid.Parse(GoChainParty);
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(GoPublicPem);
-                Assert.IsFalse(await party.VerifyAsync(crypto));
-            }
-        }
-
-        /// <summary>
         /// Test that each Go fixture fails verification after the final
         /// signature byte is flipped.
         /// </summary>
@@ -259,14 +168,6 @@ namespace Owid.Client.Test
         {
             await AssertTamperedFailsAsync(GoPublicPem, GoSimple);
             await AssertTamperedFailsAsync(GoPublicPem, GoUtf8);
-            await AssertTamperedFailsAsync(GoPublicPem, GoChainRoot);
-
-            // The chain party is verified with the genuine root as others so
-            // the failure is caused by the tampering alone.
-            await AssertTamperedFailsAsync(
-                GoPublicPem,
-                GoChainParty,
-                TestOwid.Parse(GoChainRoot));
         }
 
         /// <summary>
@@ -286,12 +187,11 @@ namespace Owid.Client.Test
         [TestMethod]
         public void TestInteropGoSerializationRoundtrip()
         {
-            AssertRoundtrip(GoSimple, GoUtf8, GoChainParty, GoChainRoot);
+            AssertRoundtrip(GoSimple, GoUtf8);
         }
 
         /// <summary>
-        /// Assert that the fixture verifies with the public key and no
-        /// others.
+        /// Assert that the fixture verifies with the public key.
         /// </summary>
         private static async Task AssertVerifiesAsync(
             string publicPem,
@@ -306,37 +206,12 @@ namespace Owid.Client.Test
         }
 
         /// <summary>
-        /// Assert that the chain party verifies with the root supplied as
-        /// others and that the root verifies alone.
-        /// </summary>
-        private static async Task AssertChainVerifiesAsync(
-            string publicPem,
-            string party,
-            string root)
-        {
-            var partyOwid = TestOwid.Parse(party);
-            var rootOwid = TestOwid.Parse(root);
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(publicPem);
-
-                // The party was signed over the root so the root must be
-                // supplied as others.
-                Assert.IsTrue(await partyOwid.VerifyAsync(crypto, rootOwid));
-
-                // The root was signed alone so it verifies without others.
-                Assert.IsTrue(await rootOwid.VerifyAsync(crypto));
-            }
-        }
-
-        /// <summary>
         /// Assert that the fixture fails verification after the final byte
         /// of its serialized form, a signature byte, is XORed with 0xFF.
         /// </summary>
         private static async Task AssertTamperedFailsAsync(
             string publicPem,
-            string base64,
-            params Model.Owid[] others)
+            string base64)
         {
             // Flip the final byte which is part of the signature.
             var bytes = Convert.FromBase64String(base64);
@@ -346,7 +221,7 @@ namespace Owid.Client.Test
             using (var crypto = ECDsa.Create())
             {
                 crypto.ImportFromPem(publicPem);
-                Assert.IsFalse(await owid.VerifyAsync(crypto, others));
+                Assert.IsFalse(await owid.VerifyAsync(crypto));
             }
         }
 

@@ -1,4 +1,4 @@
-/* ****************************************************************************
+﻿/* ****************************************************************************
  * Copyright 2026 51 Degrees Mobile Experts Limited (51degrees.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -36,26 +36,12 @@ namespace Owid.Client.Test
     [TestClass]
     public class RedirectTests
     {
-        private static HttpListener Listen(out string prefix)
-        {
-            // A free port, found by binding and releasing it.
-            var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-            probe.Start();
-            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            prefix = $"http://127.0.0.1:{port}/";
-            var listener = new HttpListener();
-            listener.Prefixes.Add(prefix);
-            listener.Start();
-            return listener;
-        }
-
         [TestMethod]
-        public void ARedirectIsNotFollowed()
+        public async Task ARedirectIsNotFollowed()
         {
             var elsewhereHits = 0;
-            using var elsewhere = Listen(out var elsewherePrefix);
-            using var creator = Listen(out var creatorPrefix);
+            using var elsewhere = Loopback.Listen(out var elsewherePrefix);
+            using var creator = Loopback.Listen(out var creatorPrefix);
             using var stop = new CancellationTokenSource();
 
             var serveElsewhere = Task.Run(async () =>
@@ -65,13 +51,25 @@ namespace Owid.Client.Test
                     HttpListenerContext context;
                     try { context = await elsewhere.GetContextAsync(); }
                     catch (Exception) { return; }
-                    Interlocked.Increment(ref elsewhereHits);
-                    var bytes = Encoding.UTF8.GetBytes(
-                        "-----BEGIN PUBLIC KEY-----\nbm90IGEga2V5\n-----END PUBLIC KEY-----\n");
-                    context.Response.StatusCode = 200;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
-                    context.Response.Close();
+                    try
+                    {
+                        Interlocked.Increment(ref elsewhereHits);
+                        var bytes = Encoding.UTF8.GetBytes(
+                            "-----BEGIN PUBLIC KEY-----\nbm90IGEga2V5\n-----END PUBLIC KEY-----\n");
+                        context.Response.StatusCode = 200;
+                        context.Response.ContentType = "text/plain";
+                        await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+                        context.Response.Close();
+                    }
+                    catch (Exception)
+                    {
+                        // A test that has finished stops its listener,
+                        // which can happen while a response is still
+                        // being written. Nothing here is under test, so
+                        // the loop ends quietly rather than faulting the
+                        // serving task.
+                        return;
+                    }
                 }
             });
             var serveCreator = Task.Run(async () =>
@@ -81,9 +79,21 @@ namespace Owid.Client.Test
                     HttpListenerContext context;
                     try { context = await creator.GetContextAsync(); }
                     catch (Exception) { return; }
-                    context.Response.StatusCode = 302;
-                    context.Response.RedirectLocation = elsewherePrefix + "key.pem";
-                    context.Response.Close();
+                    try
+                    {
+                        context.Response.StatusCode = 302;
+                        context.Response.RedirectLocation = elsewherePrefix + "key.pem";
+                        context.Response.Close();
+                    }
+                    catch (Exception)
+                    {
+                        // A test that has finished stops its listener,
+                        // which can happen while a response is still
+                        // being written. Nothing here is under test, so
+                        // the loop ends quietly rather than faulting the
+                        // serving task.
+                        return;
+                    }
                 }
             });
 
@@ -93,12 +103,8 @@ namespace Owid.Client.Test
                 HttpRequestException? refused = null;
                 try
                 {
-                    CryptoExtensions.GetPublicKey(url);
+                    await CryptoExtensions.GetPublicKeyAsync(url);
                     Assert.Fail("a redirect must not yield a key");
-                }
-                catch (AggregateException thrown)
-                {
-                    refused = thrown.InnerException as HttpRequestException;
                 }
                 catch (HttpRequestException thrown)
                 {

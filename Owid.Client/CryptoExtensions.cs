@@ -20,6 +20,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Owid.Client.Model;
@@ -64,41 +65,43 @@ namespace Owid.Client
 
 		/// <summary>
 		/// How far a creator's clock may run ahead of or behind this one's,
-		/// in minutes. A minute closer to now than this, or later, is asked
-		/// about rather than served from the cache, and is not held.
+		/// in minutes.
 		/// </summary>
 		/// <remarks>
-		/// A creator reads a date later than its own now as now, and answers
-		/// with the key in force now. Within this window this process cannot
-		/// tell whether the creator read the minute as its past or as its
-		/// present, so the answer says nothing certain about the minute. An
-		/// identifier signed just after a rotation by a creator whose clock
-		/// runs ahead would otherwise be served the old key from a span
-		/// confirmed up to now, and would read as not matching until this
-		/// clock caught up. Identifiers dated within the window are asked
-		/// about once per minute per creator, as they always were, and every
-		/// older identifier is served from the spans.
+		/// It is used in two places. A creator that does not state the span
+		/// of the key it answers with reads a date later than its own now as
+		/// now, so within this window of now this process cannot tell
+		/// whether the creator read the minute as its past or as its
+		/// present, and nothing learned from such an answer is held or
+		/// served. And a creator's signing machines may not agree with the
+		/// creator's own schedule to the minute, so an identifier dated
+		/// within this window of a key's edge that does not verify under
+		/// that key is checked against the neighbouring key before it is
+		/// reported as not matching.
 		/// </remarks>
 		private const uint ClockDriftAllowanceMinutes = 15;
 
 		/// <summary>
 		/// One key a creator has answered with, and the span of minutes the
-		/// creator has confirmed it was in force for.
+		/// key is known to cover.
 		/// </summary>
 		/// <remarks>
 		/// A creator's key is in force from the start of its period until
 		/// the next key starts, so a key the creator confirms at two minutes
-		/// was in force at every minute between them. The span grows as the
-		/// creator confirms the same key for more minutes, and an identifier
-		/// dated inside it is verified without a request.
+		/// was in force at every minute between them. Where the creator
+		/// stated the span in its answer the span is explicit and complete,
+		/// and an identifier dated anywhere inside it is verified without a
+		/// request. Otherwise the span grows as the creator confirms the same
+		/// key for more minutes.
 		/// </remarks>
 		private sealed class HeldKey
 		{
-			public HeldKey(string pem, uint minute)
+			public HeldKey(string pem, uint first, uint last, bool explicitSpan)
 			{
 				Pem = pem;
-				First = minute;
-				Last = minute;
+				First = first;
+				Last = last;
+				Explicit = explicitSpan;
 			}
 
 			/// <summary>
@@ -107,21 +110,61 @@ namespace Owid.Client
 			public string Pem { get; }
 
 			/// <summary>
-			/// The earliest minute the creator has confirmed the key for.
+			/// The earliest minute the key is known to cover.
 			/// </summary>
 			public uint First { get; set; }
 
 			/// <summary>
-			/// The latest minute the creator has confirmed the key for.
+			/// The latest minute the key is known to cover.
 			/// </summary>
 			public uint Last { get; set; }
 
 			/// <summary>
-			/// Whether the minute lies within the confirmed span.
+			/// Whether the creator stated the whole span itself.
+			/// </summary>
+			public bool Explicit { get; set; }
+
+			/// <summary>
+			/// Whether the minute lies within the known span.
 			/// </summary>
 			public bool Covers(uint minute)
 			{
 				return First <= minute && minute <= Last;
+			}
+		}
+
+		/// <summary>
+		/// What the cache or a fetch answers with. The key, and where it is
+		/// known, the span of minutes the key covers, so that a caller can
+		/// tell whether the identifier it is checking sits near the edge of
+		/// the span.
+		/// </summary>
+		internal readonly struct KeyAnswer
+		{
+			public KeyAnswer(string pem, uint first, uint last, bool known)
+			{
+				Pem = pem;
+				First = first;
+				Last = last;
+				Known = known;
+			}
+
+			/// <summary>The key in PEM form.</summary>
+			public string Pem { get; }
+
+			/// <summary>The earliest minute the key is known to cover.</summary>
+			public uint First { get; }
+
+			/// <summary>The latest minute the key is known to cover.</summary>
+			public uint Last { get; }
+
+			/// <summary>Whether the span says anything.</summary>
+			public bool Known { get; }
+
+			/// <summary>Whether the minute lies within the known span.</summary>
+			public bool Covers(uint minute)
+			{
+				return Known && First <= minute && minute <= Last;
 			}
 		}
 
@@ -135,21 +178,17 @@ namespace Owid.Client
 		/// <summary>
 		/// Keys already fetched, by the creator's key end point, which is
 		/// the key URL without its date. Each end point holds the keys the
-		/// creator has answered with, each with the span of minutes the
-		/// creator has confirmed it for.
+		/// creator has answered with, each with the span of minutes it is
+		/// known to cover.
 		/// </summary>
 		/// <remarks>
 		/// The key URL carries the date of the OWID being verified, in
 		/// minutes, and a creator's key changes on the order of a week.
-		/// Keyed by the whole URL, as this cache once was, two identifiers
-		/// signed a minute apart never shared an entry, so a hundred
-		/// identifiers over a hundred minutes made a hundred requests for
-		/// one key. Keyed by end point and span, an identifier dated between
-		/// two minutes the creator has already answered for is verified
-		/// without a request. The domain and the date come from the OWIDs
-		/// presented to this process rather than from the process itself,
-		/// so the number of keys held is bounded by
-		/// <see cref="MaximumCachedKeys"/>.
+		/// Keyed by end point and span rather than by the whole URL, an identifier dated inside
+		/// a span the creator has stated or confirmed is verified without a
+		/// request. The domain and the date come from the OWIDs presented to
+		/// this process rather than from the process itself, so the number
+		/// of keys held is bounded by <see cref="MaximumCachedKeys"/>.
 		/// </remarks>
 		private static readonly Dictionary<string, List<HeldKey>>
 			_publicKeyCache = new Dictionary<string, List<HeldKey>>();
@@ -165,8 +204,8 @@ namespace Owid.Client
 		/// their own. An entry is removed when its request ends, whatever
 		/// the outcome, so a failure is never handed to a later caller.
 		/// </summary>
-		private static readonly Dictionary<Uri, Task<string>> _inFlight =
-			new Dictionary<Uri, Task<string>>();
+		private static readonly Dictionary<Uri, Task<KeyAnswer>> _inFlight =
+			new Dictionary<Uri, Task<KeyAnswer>>();
 
 		/// <summary>
 		/// How many keys the cache holds, for the tests.
@@ -231,12 +270,10 @@ namespace Owid.Client
 			Model.Owid[] others,
 			CancellationToken cancellationToken = default)
 		{
-			using (var crypto = await owid.GetPublicKeyAsync(
-				"https",
-				cancellationToken).ConfigureAwait(false))
-			{
-				return owid.Verify(crypto, others);
-			}
+			return await owid.VerifyAtAsync(
+				KeyEndPointFor(owid, "https"),
+				others,
+				cancellationToken).ConfigureAwait(false);
 		}
 
         /// <summary>
@@ -263,9 +300,7 @@ namespace Owid.Client
         /// question could not be answered, which is a different thing and must
         /// never be reported as a forgery. A key that cannot be decoded leaves
         /// the signature unjudged, and a caller acting on "invalid" would
-        /// reject good identifiers during an outage. On 30 August 2026 the key
-        /// endpoints served PEM a strict parser rejects and every offline
-        /// verification failed, with the keys and the identifiers both fine.
+        /// reject good identifiers during an outage. 
         /// </remarks>
         public static OwidSignatureStatus SignatureStatus(
             this Model.Owid owid,
@@ -409,54 +444,196 @@ namespace Owid.Client
         }
 
 		/// <summary>
-		/// Gets the public key for the owid from the creator's domain.
+		/// The creator's key end point for the OWID over the scheme given,
+		/// being the key URL without its query.
 		/// </summary>
-		/// <param name="owid"></param>
-		/// <param name="scheme"></param>
-		/// <param name="cancellationToken"></param>
-		/// <returns></returns>
-		private static async Task<ECDsa> GetPublicKeyAsync(
-			this Model.Owid owid,
-			string scheme,
-			CancellationToken cancellationToken)
-        {
-            // Construct the URL to get the public key.
-            UriBuilder u = new UriBuilder(
-                scheme,
-                owid.Domain);
-            u.Path = @$"/owid/api/v{(byte)owid.Version}/public-key";
-            // Send the OWID's own date so a creator that rotates keys returns
-            // the key that was current when the OWID was signed, letting OWIDs
-            // created before a rotation still verify. Creators that do not
-            // support dated lookup ignore it and return the current key.
-            u.Query = owid.Date >= Constants.BaseDate
-                ? @$"format=pkcs&date={(uint)(owid.Date - Constants.BaseDate).TotalMinutes}"
-                : "format=pkcs";
+		private static string KeyEndPointFor(Model.Owid owid, string scheme)
+		{
+			var u = new UriBuilder(scheme, owid.Domain)
+			{
+				Path = @$"/owid/api/v{(byte)owid.Version}/public-key"
+			};
+			return u.Uri.GetLeftPart(UriPartial.Path);
+		}
 
-			// Fetch the public key PEM associated with the OWID.
-			var publicKeyPem = await GetPublicKeyAsync(
-				u.Uri,
-				cancellationToken).ConfigureAwait(false);
+		/// <summary>
+		/// The key URL asking the end point for the key in force at the
+		/// minute, or for the key in force now where there is no minute.
+		/// </summary>
+		/// <remarks>
+		/// Sending the OWID's own date lets a creator that rotates keys
+		/// return the key that was current when the OWID was signed, so
+		/// OWIDs created before a rotation still verify. Creators that do not
+		/// support dated lookup ignore it and return the current key.
+		/// </remarks>
+		private static Uri KeyUriFor(string endPoint, uint? minute)
+		{
+			return new Uri(minute.HasValue
+				? endPoint + "?format=pkcs&date=" + minute.Value
+				: endPoint + "?format=pkcs");
+		}
 
+		/// <summary>
+		/// The OWID's date as minutes since the base date, or null where it
+		/// is before the base date and cannot be counted.
+		/// </summary>
+		private static uint? MinuteOf(Model.Owid owid)
+		{
+			return owid.Date >= Constants.BaseDate
+				? (uint)(owid.Date - Constants.BaseDate).TotalMinutes
+				: null;
+		}
+
+		/// <summary>
+		/// The ECDsa provider for the key in PEM form.
+		/// </summary>
+		private static ECDsa ImportKey(string publicKeyPem)
+		{
 			// Reject an empty or whitespace PEM with a clear message rather
 			// than relying on the opaque exception thrown by ImportFromPem.
 			if (string.IsNullOrWhiteSpace(publicKeyPem))
 			{
 				throw new ArgumentException("public key PEM is empty");
 			}
-
-			// Create the ECDsa provider with the public key associated with
-			// the OWID.
 			var key = ECDsa.Create();
 			key.ImportFromPem(publicKeyPem);
 			return key;
-        }
+		}
 
 		/// <summary>
-		/// Get the public key PEM for the key URL. Answered from the cache
-		/// where the creator has already confirmed a key for the minute the
-		/// URL names, from a request already under way for the same URL
-		/// where there is one, and otherwise by asking the creator.
+		/// Verify the OWID against the key its creator's end point serves
+		/// for the OWID's own date, trying the neighbouring key where the
+		/// signature fails within the clock drift allowance of the edge of
+		/// the key's span.
+		/// </summary>
+		/// <remarks>
+		/// Internal rather than private so the test project can point it at
+		/// a stand in end point by URL, since the domain an OWID carries
+		/// cannot name a port.
+		/// </remarks>
+		internal static async Task<bool> VerifyAtAsync(
+			this Model.Owid owid,
+			string endPoint,
+			Model.Owid[] others,
+			CancellationToken cancellationToken)
+		{
+			var answer = await GetKeyAsync(
+				KeyUriFor(endPoint, MinuteOf(owid)),
+				cancellationToken).ConfigureAwait(false);
+			using (var crypto = ImportKey(answer.Pem))
+			{
+				if (owid.Verify(crypto, others))
+				{
+					return true;
+				}
+			}
+			return await NeighbourVerifiesAsync(
+				owid, endPoint, answer, others, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		/// <summary>
+		/// Whether a key neighbouring the one the OWID's own minute selected
+		/// verifies the signature instead.
+		/// </summary>
+		/// <remarks>
+		/// A creator's signing machines may not agree with its own schedule
+		/// to the minute, so an identifier dated just after a key started
+		/// may have been signed with the key before it, and one dated just
+		/// before may have been signed with the key after. Where the
+		/// signature does not verify under the key selected and the OWID's
+		/// minute is within the clock drift allowance of the edge of the
+		/// span that key is known to cover, the key for the minute just
+		/// beyond that edge is asked for and tried. A key already known to
+		/// cover the neighbouring minute is not asked for again, and a
+		/// neighbour that turns out to be the same key is not tried again.
+		/// This costs at most two more requests, and only for a signature
+		/// that has already failed.
+		/// </remarks>
+		private static async Task<bool> NeighbourVerifiesAsync(
+			Model.Owid owid,
+			string endPoint,
+			KeyAnswer tried,
+			Model.Owid[] others,
+			CancellationToken cancellationToken)
+		{
+			var minute = MinuteOf(owid);
+			if (minute == null)
+			{
+				return false;
+			}
+			if (tried.Known && tried.Covers(minute.Value) == false)
+			{
+				// The key tried was never in force at the OWID's minute, so
+				// the OWID is not near an edge of that key's span. This is a
+				// request without a date answered with the current key, or a
+				// creator whose answer did not cover the minute asked about,
+				// and the neighbours of the minute have nothing to do with
+				// the key tried.
+				return false;
+			}
+			foreach (var at in new long[]
+			{
+				(long)minute.Value - ClockDriftAllowanceMinutes,
+				(long)minute.Value + ClockDriftAllowanceMinutes,
+			})
+			{
+				if (at < 0 || at > uint.MaxValue || tried.Covers((uint)at))
+				{
+					continue;
+				}
+				KeyAnswer neighbour;
+				try
+				{
+					neighbour = await GetKeyAsync(
+						KeyUriFor(endPoint, (uint)at),
+						cancellationToken).ConfigureAwait(false);
+				}
+				catch (Exception e) when (e is not OperationCanceledException)
+				{
+					// A neighbour that cannot be obtained leaves the failure
+					// under the selected key standing.
+					continue;
+				}
+				if (neighbour.Pem == tried.Pem)
+				{
+					continue;
+				}
+				using (var crypto = ImportKey(neighbour.Pem))
+				{
+					if (owid.Verify(crypto, others))
+					{
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// Get the public key PEM for the key URL. See
+		/// <see cref="GetKeyAsync(Uri, CancellationToken)"/>.
+		/// </summary>
+		/// <param name="u"></param>
+		/// <param name="cancellationToken"></param>
+		/// <returns></returns>
+		// Internal rather than private so the test project can point it
+		// at a stand in end point by URL, since the domain an OWID carries
+		// cannot name a port.
+		internal static async Task<string> GetPublicKeyAsync(
+			Uri u,
+			CancellationToken cancellationToken = default)
+		{
+			var answer = await GetKeyAsync(u, cancellationToken)
+				.ConfigureAwait(false);
+			return answer.Pem;
+		}
+
+		/// <summary>
+		/// Get the key for the key URL, with the span it is known to cover.
+		/// Answered from the cache where a held key is known to cover the
+		/// minute the URL names, from a request already under way for the
+		/// same URL where there is one, and otherwise by asking the creator.
 		/// </summary>
 		/// <remarks>
 		/// The token ends this caller's wait, not the shared request. A
@@ -466,28 +643,19 @@ namespace Owid.Client
 		/// many. The request runs to completion and the next caller finds
 		/// the key in the cache.
 		/// </remarks>
-		/// <param name="u"></param>
-		/// <param name="cancellationToken"></param>
-		/// <returns></returns>
-		// Internal rather than private so the test project can point it
-		// at a stand in end point by URL, since the domain an OWID carries
-		// cannot name a port.
-		internal static Task<string> GetPublicKeyAsync(
+		internal static Task<KeyAnswer> GetKeyAsync(
 			Uri u,
 			CancellationToken cancellationToken = default)
 		{
 			var endPoint = EndPointOf(u);
-			var minute = MinuteOf(u);
-			Task<string>? held;
-			TaskCompletionSource<string>? source = null;
+			Task<KeyAnswer>? held;
+			TaskCompletionSource<KeyAnswer>? source = null;
 			lock (_cacheLock)
 			{
-				var pem = minute.HasValue
-					? HeldPem(endPoint, minute.Value)
-					: null;
-				if (pem != null)
+				var cached = HeldFor(endPoint, u);
+				if (cached != null)
 				{
-					return Task.FromResult(pem);
+					return Task.FromResult(cached.Value);
 				}
 				if (_inFlight.TryGetValue(u, out held) == false)
 				{
@@ -495,7 +663,7 @@ namespace Owid.Client
 					// caller is the one that performs the request. Every
 					// other caller arriving before it ends waits on the
 					// task just added.
-					source = new TaskCompletionSource<string>(
+					source = new TaskCompletionSource<KeyAnswer>(
 						TaskCreationOptions.RunContinuationsAsynchronously);
 					held = source.Task;
 					_inFlight[u] = held;
@@ -503,7 +671,7 @@ namespace Owid.Client
 			}
 			if (source != null)
 			{
-				_ = FetchIntoAsync(u, endPoint, minute, source);
+				_ = FetchIntoAsync(u, endPoint, source);
 			}
 			return held.WaitAsync(cancellationToken);
 		}
@@ -514,17 +682,19 @@ namespace Owid.Client
 		/// for that URL is waiting on.
 		/// </summary>
 		/// <remarks>
-		/// A key that arrives is held against the minute asked about before
-		/// the request is forgotten, so a caller arriving between the two
-		/// finds the key rather than starting a request of its own. A fetch
-		/// that fails is only forgotten, so the next caller makes a fresh
-		/// request rather than being handed the old failure.
+		/// The answer is the JSON form, which carries the moments the key is
+		/// valid from and to as well as the key, so the whole span is held
+		/// from that one answer. An answer in any other form, the PEM alone
+		/// among them, is refused. A key that arrives is held before the request
+		/// is forgotten, so a caller arriving between the two finds the key
+		/// rather than starting a request of its own. A fetch that fails is
+		/// only forgotten, so the next caller makes a fresh request rather
+		/// than being handed the old failure.
 		/// </remarks>
 		private static async Task FetchIntoAsync(
 			Uri u,
 			string endPoint,
-			uint? minute,
-			TaskCompletionSource<string> source)
+			TaskCompletionSource<KeyAnswer> source)
 		{
 			try
 			{
@@ -533,18 +703,17 @@ namespace Owid.Client
 				// disposes it with the client, so a caller who later wrapped
 				// this in a using would take the handler away from every
 				// other fetch, and with it the refusal to follow redirects.
-				var publicKey = await new HttpClient(_handler, false)
+				var body = await new HttpClient(_handler, false)
 					.GetStringAsync(u)
 					.ConfigureAwait(false);
+				var (pem, start, end) = ReadKeyBody(body);
+				KeyAnswer answer;
 				lock (_cacheLock)
 				{
-					if (minute.HasValue)
-					{
-						Hold(endPoint, minute.Value, publicKey);
-					}
+					answer = Hold(endPoint, u, pem, start, end);
 					Forget(u, source.Task);
 				}
-				source.SetResult(publicKey);
+				source.SetResult(answer);
 			}
 			catch (Exception e)
 			{
@@ -557,12 +726,70 @@ namespace Owid.Client
 		}
 
 		/// <summary>
+		/// Reads a public key answer, returning the PEM and the span in
+		/// minutes since the base date. The end is the minute the next key
+		/// starts. Either is null where the answer does not state it.
+		/// </summary>
+		/// <exception cref="ArgumentException">
+		/// The answer is not the JSON form the specification requires, the
+		/// PEM alone among the other forms, or fails the checks a creator
+		/// applies before sending it.
+		/// </exception>
+		private static (string pem, uint? start, uint? end) ReadKeyBody(string body)
+		{
+			PublicKeyResponse? answer;
+			try
+			{
+				answer = JsonSerializer.Deserialize<PublicKeyResponse>(body);
+			}
+			catch (JsonException e)
+			{
+				throw new ArgumentException(
+					"the public key answer is not the JSON form the specification requires", e);
+			}
+			if (answer == null)
+			{
+				throw new ArgumentException("the public key answer holds no key");
+			}
+			try
+			{
+				answer.Validate(null);
+			}
+			catch (InvalidOperationException e)
+			{
+				throw new ArgumentException(e.Message, e);
+			}
+			return (answer.PublicKeySPKI, MinutesOf(answer.ValidFrom), MinutesOf(answer.ValidTo));
+		}
+
+		/// <summary>
+		/// The moment as minutes since the base date, or null where there is
+		/// no moment or it is before the count begins.
+		/// </summary>
+		private static uint? MinutesOf(DateTime? moment)
+		{
+			if (moment == null)
+			{
+				return null;
+			}
+			var utc = moment.Value.Kind == DateTimeKind.Local
+				? moment.Value.ToUniversalTime()
+				: DateTime.SpecifyKind(moment.Value, DateTimeKind.Utc);
+			if (utc < Constants.BaseDate)
+			{
+				return null;
+			}
+			var minutes = (utc - Constants.BaseDate).TotalMinutes;
+			return minutes >= uint.MaxValue ? uint.MaxValue : (uint)minutes;
+		}
+
+		/// <summary>
 		/// Removes the request from those under way. The entry is matched
 		/// on identity as well as URL, so a request that ends after the
 		/// cache was emptied and a fresh request started for the same URL
 		/// removes only itself and never the one that replaced it.
 		/// </summary>
-		private static void Forget(Uri u, Task<string> request)
+		private static void Forget(Uri u, Task<KeyAnswer> request)
 		{
 			if (_inFlight.TryGetValue(u, out var recorded)
 				&& ReferenceEquals(recorded, request))
@@ -581,18 +808,13 @@ namespace Owid.Client
 		}
 
 		/// <summary>
-		/// The minute the cache reads the URL as asking about, or null where
-		/// the cache must not be used for the request.
+		/// The minute the URL asks about, and whether it lies within the
+		/// clock drift allowance of now or later, which is a minute a creator
+		/// that does not state its spans may have read as its present rather
+		/// than as the minute named. Returns false where the URL names no
+		/// minute.
 		/// </summary>
-		/// <remarks>
-		/// The date parameter where the URL carries one and it is at least
-		/// <see cref="ClockDriftAllowanceMinutes"/> behind now. A request
-		/// without a date asks for the key in force now, and one dated
-		/// within the allowance, or later, may be read by the creator as its
-		/// present rather than as the minute named, so neither is served
-		/// from the cache nor held in it.
-		/// </remarks>
-		private static uint? MinuteOf(Uri u)
+		private static bool TryMinuteOf(Uri u, out uint minute, out bool recent)
 		{
 			var now = (uint)Math.Min(
 				(DateTime.UtcNow - Constants.BaseDate).TotalMinutes,
@@ -600,61 +822,127 @@ namespace Owid.Client
 			foreach (var pair in u.Query.TrimStart('?').Split('&'))
 			{
 				if (pair.StartsWith("date=", StringComparison.Ordinal)
-					&& uint.TryParse(pair.Substring(5), out var minute)
-					&& now >= ClockDriftAllowanceMinutes
-					&& minute <= now - ClockDriftAllowanceMinutes)
+					&& uint.TryParse(pair.Substring(5), out minute))
 				{
-					return minute;
+					recent = now < ClockDriftAllowanceMinutes
+						|| minute > now - ClockDriftAllowanceMinutes;
+					return true;
 				}
 			}
-			return null;
+			minute = 0;
+			recent = false;
+			return false;
 		}
 
 		/// <summary>
-		/// The key held for the end point whose confirmed span covers the
-		/// minute, or null where no held key does. Called under the lock.
-		/// </summary>
-		private static string? HeldPem(string endPoint, uint minute)
-		{
-			if (_publicKeyCache.TryGetValue(endPoint, out var keys))
-			{
-				foreach (var key in keys)
-				{
-					if (key.Covers(minute))
-					{
-						return key.Pem;
-					}
-				}
-			}
-			return null;
-		}
-
-		/// <summary>
-		/// Records that the creator answered the minute with the key. Called
-		/// under the lock.
+		/// The key held for the end point that is known to cover the minute
+		/// the URL asks about, or null where none is. Called under the lock.
 		/// </summary>
 		/// <remarks>
-		/// A key already held for the end point has its span widened to take
-		/// in the minute. A key not held before is added, emptying the cache
-		/// first when it is full, because the domains and dates asked about
-		/// come from the OWIDs presented to this process and the cache must
-		/// not grow on their input.
+		/// A minute within the drift allowance of now is only served where
+		/// the creator itself stated the span, because a span confirmed
+		/// minute by minute says nothing certain about such a minute.
 		/// </remarks>
-		private static void Hold(string endPoint, uint minute, string pem)
+		private static KeyAnswer? HeldFor(string endPoint, Uri u)
 		{
+			if (TryMinuteOf(u, out var minute, out var recent) == false)
+			{
+				return null;
+			}
 			if (_publicKeyCache.TryGetValue(endPoint, out var keys))
 			{
 				foreach (var key in keys)
 				{
-					if (key.Pem == pem && Widen(keys, key, minute))
+					if (key.Covers(minute) && (key.Explicit || recent == false))
 					{
-						return;
+						return new KeyAnswer(key.Pem, key.First, key.Last, true);
 					}
 				}
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Records the creator's answer to the URL, being the key and, where
+		/// the creator stated it, the span the key covers as the minute it
+		/// came into force and the minute the next key starts. Returns the
+		/// key with the span it is now known to cover. Called under the
+		/// lock.
+		/// </summary>
+		/// <remarks>
+		/// With both the start and the end the whole span is held as the
+		/// creator's own statement. With the start alone the key is held
+		/// from the start up to the drift allowance behind now, because no
+		/// later key can have started before then. With neither the minute
+		/// asked about is held on its own, as long as it is not within the
+		/// drift allowance of now. A key already held for the end point has
+		/// its span widened to take in the new one. A key not held before is
+		/// added, emptying the cache first when it is full, because the
+		/// cache must not grow on the input of whoever presents the OWIDs.
+		/// </remarks>
+		private static KeyAnswer Hold(
+			string endPoint,
+			Uri u,
+			string pem,
+			uint? start,
+			uint? end)
+		{
+			var dated = TryMinuteOf(u, out var minute, out var recent);
+			uint first;
+			uint last;
+			var explicitSpan = false;
+			if (start != null && end != null && end.Value > start.Value)
+			{
+				first = start.Value;
+				last = end.Value - 1;
+				explicitSpan = true;
+			}
+			else if (start != null)
+			{
+				var now = (uint)Math.Min(
+					(DateTime.UtcNow - Constants.BaseDate).TotalMinutes,
+					uint.MaxValue);
+				first = start.Value;
+				last = now >= ClockDriftAllowanceMinutes
+					&& now - ClockDriftAllowanceMinutes > first
+					? now - ClockDriftAllowanceMinutes
+					: first;
+			}
+			else if (dated && recent == false)
+			{
+				first = minute;
+				last = minute;
 			}
 			else
 			{
-				keys = null;
+				return new KeyAnswer(pem, 0, 0, false);
+			}
+			_publicKeyCache.TryGetValue(endPoint, out var keys);
+			if (keys != null)
+			{
+				foreach (var key in keys)
+				{
+					if (key.Pem == pem)
+					{
+						if (Widen(keys, key, first, last))
+						{
+							key.Explicit = key.Explicit || explicitSpan;
+							return new KeyAnswer(pem, key.First, key.Last, true);
+						}
+						// The creator has answered with another key inside
+						// this span before, which it does not do unless it
+						// went back to a key it had left. Nothing more is
+						// held about this key.
+						return new KeyAnswer(pem, 0, 0, false);
+					}
+				}
+				foreach (var other in keys)
+				{
+					if (other.Last >= first && other.First <= last)
+					{
+						return new KeyAnswer(pem, 0, 0, false);
+					}
+				}
 			}
 			if (_heldKeys >= MaximumCachedKeys)
 			{
@@ -667,46 +955,36 @@ namespace Owid.Client
 				keys = new List<HeldKey>();
 				_publicKeyCache[endPoint] = keys;
 			}
-			keys.Add(new HeldKey(pem, minute));
+			keys.Add(new HeldKey(pem, first, last, explicitSpan));
 			_heldKeys++;
+			return new KeyAnswer(pem, first, last, true);
 		}
 
 		/// <summary>
-		/// Widens the span of a held key to take in the minute, and says
-		/// whether the minute is now within it.
+		/// Widens the span of a held key to take in the span given, and says
+		/// whether it did.
 		/// </summary>
 		/// <remarks>
 		/// The span is not widened across a minute the creator has answered
 		/// with another key for, because that would mean the creator had
 		/// gone back to a key it had left, and the minutes between the two
-		/// spans are then not this key's to claim. The key is held again as
-		/// a separate span instead.
+		/// spans are then not this key's to claim.
 		/// </remarks>
-		private static bool Widen(List<HeldKey> keys, HeldKey key, uint minute)
+		private static bool Widen(List<HeldKey> keys, HeldKey key, uint first, uint last)
 		{
-			if (key.Covers(minute))
-			{
-				return true;
-			}
-			var from = Math.Min(minute, key.First);
-			var to = Math.Max(minute, key.Last);
+			first = Math.Min(first, key.First);
+			last = Math.Max(last, key.Last);
 			foreach (var other in keys)
 			{
 				if (ReferenceEquals(other, key) == false
-					&& other.Last > from
-					&& other.First < to)
+					&& other.Last >= first
+					&& other.First <= last)
 				{
 					return false;
 				}
 			}
-			if (minute < key.First)
-			{
-				key.First = minute;
-			}
-			else
-			{
-				key.Last = minute;
-			}
+			key.First = first;
+			key.Last = last;
 			return true;
 		}
 

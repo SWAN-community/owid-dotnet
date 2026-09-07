@@ -88,32 +88,40 @@ namespace Owid.Client.Controllers
         }
 
         /// <summary>
-        /// Returns the public key for the OWID creator. With a date, returns
-        /// the key in force at that date; without one, the key in force now.
-        /// A date later than the moment of the request is read as that
-        /// moment.
+        /// Returns the public key for the OWID creator as a
+        /// <see cref="PublicKeyResponse"/>, being the key and the moments it
+        /// is valid from and to where the store knows them. With a date,
+        /// returns the key in force at that date; without one, the key in
+        /// force now. A date later than the moment of the request is read as
+        /// that moment. The answer is checked before it is sent, and a store
+        /// whose key cannot be read or whose schedule contradicts itself is
+        /// reported as a server error rather than passed on.
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
         /// encoding).
         /// </param>
         /// <returns>
-        /// The public key, or 404 when no key was active at the requested date.
+        /// The public key answer, or 404 when no key was active at the
+        /// requested date.
         /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public async Task<ActionResult<string?>> GetPublicKey(uint? date = null)
+        public async Task<ActionResult<PublicKeyResponse>> GetPublicKey(uint? date = null)
         {
             var denied = await AuthorizeAsync();
             if (denied != null)
             {
                 return denied;
             }
-            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
+            var asked = ClampToNow(date);
+            var period = _publicKeyStore.GetPublicKeyPeriod(asked);
+            var key = period?.PublicKey ?? _publicKeyStore.GetPublicKey(asked);
             if (key == null)
             {
                 // Nothing is in force at the requested moment, which for an
@@ -122,9 +130,26 @@ namespace Owid.Client.Controllers
                 // never reads a missing key as a key.
                 return NotFound();
             }
-            return key;
+            try
+            {
+                return PublicKeyResponse.For(key, period, asked ?? NowMinutes());
+            }
+            catch (InvalidOperationException e)
+            {
+                // The store answered with something a client would refuse,
+                // which is this creator's fault and not the caller's.
+                return StatusCode(StatusCodes.Status500InternalServerError, e.Message);
+            }
         }
 
+        /// <summary>
+        /// Now as minutes since the base date.
+        /// </summary>
+        private static uint NowMinutes()
+        {
+            var minutes = (DateTime.UtcNow - OwidBaseDate).TotalMinutes;
+            return minutes >= uint.MaxValue ? uint.MaxValue : (uint)minutes;
+        }
 
         /// <summary>
         /// Returns the creator domain and signing public key. With a date,

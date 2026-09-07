@@ -68,10 +68,23 @@ namespace Owid.Client.Test
         {
             using (var controller = new OwidController(Configuration!))
             {
-                Assert.AreEqual(
-                    Configuration!.PublicKey,
-                    (await controller.GetPublicKey()).Value);
+                var answer = (await controller.GetPublicKey()).Value!;
+                Assert.AreEqual(Configuration!.PublicKey, answer.PublicKeySPKI);
+                Assert.IsNull(answer.ValidFrom, "the configured key has no schedule");
+                Assert.IsNull(answer.ValidTo);
             }
+        }
+
+        /// <summary>
+        /// The public key of a newly made key pair, in PEM form, for a store
+        /// whose answer has to pass the checks a creator applies before
+        /// sending it.
+        /// </summary>
+        private static string FreshPem()
+        {
+            using var crypto = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            return new String(PemEncoding.Write(
+                "PUBLIC KEY", crypto.ExportSubjectPublicKeyInfo()));
         }
 
         /// <summary>
@@ -136,10 +149,14 @@ namespace Owid.Client.Test
         [TestMethod]
         public async Task TestGetPublicKeyWithDateUsesStore()
         {
+            var oldKey = FreshPem();
+            var newKey = FreshPem();
+            var oldStart = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+            var newStart = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc);
             var store = new DatedKeyStore(new[]
             {
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "old" },
-                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), PublicKey = "new" },
+                new DatedPublicKey { StartsAt = oldStart, PublicKey = oldKey },
+                new DatedPublicKey { StartsAt = newStart, PublicKey = newKey },
             });
             using (var controller = new OwidController(Configuration!, store))
             {
@@ -147,8 +164,40 @@ namespace Owid.Client.Test
                 var minutes = (uint)(
                     new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc) - epoch)
                     .TotalMinutes;
-                Assert.AreEqual(
-                    "old", (await controller.GetPublicKey(minutes)).Value);
+                var answer = (await controller.GetPublicKey(minutes)).Value!;
+                Assert.AreEqual(oldKey, answer.PublicKeySPKI);
+                Assert.AreEqual(oldStart, answer.ValidFrom!.Value,
+                    "the answer states when the old key came into force");
+                Assert.AreEqual(newStart, answer.ValidTo!.Value,
+                    "and when the new key takes over");
+
+                minutes = (uint)(
+                    new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc) - epoch)
+                    .TotalMinutes;
+                answer = (await controller.GetPublicKey(minutes)).Value!;
+                Assert.AreEqual(newKey, answer.PublicKeySPKI);
+                Assert.AreEqual(newStart, answer.ValidFrom!.Value);
+                Assert.IsNull(answer.ValidTo, "the last key of the schedule has no end");
+            }
+        }
+
+        /// <summary>
+        /// A store holding something that is not a public key, or a schedule
+        /// that contradicts itself, is a server error rather than an answer
+        /// a client would then have to refuse.
+        /// </summary>
+        [TestMethod]
+        public async Task TestGetPublicKeyRefusesAnAnswerAClientWouldRefuse()
+        {
+            var store = new DatedKeyStore(new[]
+            {
+                new DatedPublicKey { StartsAt = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc), PublicKey = "not a key" },
+            });
+            using (var controller = new OwidController(Configuration!, store))
+            {
+                var result = (await controller.GetPublicKey()).Result as ObjectResult;
+                Assert.IsNotNull(result, "a key that cannot be read is answered with a status");
+                Assert.AreEqual(StatusCodes.Status500InternalServerError, result!.StatusCode);
             }
         }
 
@@ -207,17 +256,18 @@ namespace Owid.Client.Test
         public async Task TestFutureDateIsReadAsNowOnBothEndPoints()
         {
             var now = DateTime.UtcNow;
+            var inForce = FreshPem();
             var store = new DatedKeyStore(new[]
             {
                 new DatedPublicKey
                 {
                     StartsAt = now.AddDays(-7),
-                    PublicKey = "in-force",
+                    PublicKey = inForce,
                 },
                 new DatedPublicKey
                 {
                     StartsAt = now.AddDays(7),
-                    PublicKey = "not-started",
+                    PublicKey = FreshPem(),
                 },
             });
             var epoch = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -225,16 +275,16 @@ namespace Owid.Client.Test
             using (var controller = new OwidController(Configuration!, store))
             {
                 Assert.AreEqual(
-                    "in-force",
-                    (await controller.GetPublicKey(nextMonth)).Value);
+                    inForce,
+                    (await controller.GetPublicKey(nextMonth)).Value!.PublicKeySPKI);
                 Assert.AreEqual(
-                    "in-force",
+                    inForce,
                     (await controller.GetCreator(nextMonth)).Value!.PublicKeySPKI);
                 // The largest value the parameter can carry is later than
                 // now as well, so it takes the same answer.
                 Assert.AreEqual(
-                    "in-force",
-                    (await controller.GetPublicKey(uint.MaxValue)).Value);
+                    inForce,
+                    (await controller.GetPublicKey(uint.MaxValue)).Value!.PublicKeySPKI);
             }
         }
 
@@ -277,7 +327,7 @@ namespace Owid.Client.Test
                 };
                 Assert.AreEqual(
                     Configuration!.PublicKey,
-                    (await controller.GetPublicKey()).Value);
+                    (await controller.GetPublicKey()).Value!.PublicKeySPKI);
                 Assert.AreEqual(
                     Configuration!.Domain,
                     (await controller.GetCreator()).Value!.Domain);

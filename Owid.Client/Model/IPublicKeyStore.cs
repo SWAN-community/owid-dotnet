@@ -41,5 +41,18 @@ namespace Owid.Client.Model
         /// Minutes since 2020-01-01 UTC, or null for the current key.
         /// </param>
         string? GetPublicKey(uint? dateMinutes);
+
+        /// <summary>
+        /// The key in force at the given date together with the span it
+        /// covers, or null where the store does not know the span. The
+        /// public key end point states the span in its JSON answer where
+        /// the store can supply it, so a client holds the key for the whole
+        /// span from one answer rather than asking again for every minute.
+        /// A store that knows only the key leaves this as it is.
+        /// </summary>
+        /// <param name="dateMinutes">
+        /// Minutes since 2020-01-01 UTC, or null for the current key.
+        /// </param>
+        PublicKeyPeriod? GetPublicKeyPeriod(uint? dateMinutes) => null;
     }
 }

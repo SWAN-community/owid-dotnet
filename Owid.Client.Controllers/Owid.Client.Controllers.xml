@@ -4,24 +4,6 @@
         <name>Owid.Client.Controllers</name>
     </assembly>
     <members>
-        <member name="T:Owid.Client.Controllers.CreatorResponse">
-            <summary>
-            The creator end point response, per the SWAN OWID spec. Carries the
-            creator domain and the signing public key in SPKI form, so a consumer
-            can cache the key without a second call. With a date the key that was
-            current then is returned, matching the public-key end point.
-            </summary>
-        </member>
-        <member name="P:Owid.Client.Controllers.CreatorResponse.Domain">
-            <summary>
-            The domain the key relates to.
-            </summary>
-        </member>
-        <member name="P:Owid.Client.Controllers.CreatorResponse.PublicKeySPKI">
-            <summary>
-            The signing public key in SPKI form.
-            </summary>
-        </member>
         <member name="T:Owid.Client.Controllers.IOwidAuthorizer">
             <summary>
             Decides whether a request may use the public-key and creator
@@ -73,37 +55,35 @@
             now as well, so it takes the same answer rather than an error.
             </summary>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32})">
+        <member name="M:Owid.Client.Controllers.OwidController.GetPublicKey(System.Nullable{System.UInt32},System.String)">
             <summary>
-            Returns the public key for the OWID creator. With a date, returns
-            the key in force at that date; without one, the key in force now.
-            A date later than the moment of the request is read as that
-            moment.
+            Returns the public key for the OWID creator as a
+            <see cref="T:Owid.Client.Model.PublicKeyResponse"/>, being the key and the moments it
+            is valid from and to where the store knows them. With a date,
+            returns the key in force at that date; without one, the key in
+            force now. A date later than the moment of the request is read as
+            that moment. The answer is checked before it is sent, and a store
+            whose key cannot be read or whose schedule contradicts itself is
+            reported as a server error rather than passed on.
             </summary>
             <param name="date">
             Optional date as minutes since 2020-01-01 UTC (the OWID date
-            encoding).
+            encoding), being the minute the key is asked for.
+            </param>
+            <param name="format">
+            Optional encoding of the key in the answer. The only value
+            defined is spki, which is taken when the parameter is absent, and
+            any other value is answered 400.
             </param>
             <returns>
-            The public key, or 404 when no key was active at the requested date.
+            The public key answer, 400 for a format this creator does not
+            serve, or 404 when no key was active at the requested date.
             </returns>
         </member>
-        <member name="M:Owid.Client.Controllers.OwidController.GetCreator(System.Nullable{System.UInt32})">
+        <member name="M:Owid.Client.Controllers.OwidController.NowMinutes">
             <summary>
-            Returns the creator domain and signing public key. With a date,
-            returns the key in force at that date; without one, the key in
-            force now, and a date later than the moment of the request is read
-            as that moment. This matches the public-key end point so the two
-            agree.
+            Now as minutes since the base date.
             </summary>
-            <param name="date">
-            Optional date as minutes since 2020-01-01 UTC (the OWID date
-            encoding).
-            </param>
-            <returns>
-            The creator info, or 404 when no key was active at the requested
-            date.
-            </returns>
         </member>
     </members>
 </doc>

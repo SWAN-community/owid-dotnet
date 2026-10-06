@@ -96,68 +96,6 @@ namespace Owid.Client
         }
 
         /// <summary>
-        /// Sign the OWID provided.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <returns></returns>
-        internal Model.Owid Sign(Model.Owid owid)
-        {
-            return SignWithOthers(owid, Constants.Empty);
-        }
-
-        /// <summary>
-        /// Sign the OWID provided AND the other OWIDs provided.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <param name="others"></param>
-        /// <returns></returns>
-        internal Model.Owid Sign(
-            Model.Owid owid,
-            params Model.Owid[] others)
-        {
-            return SignWithOthers(owid, others);
-        }
-
-        /// <summary>
-        /// Sign the OWID provided AND the other OWIDs provided.
-        /// </summary>
-        /// <param name="owid"></param>
-        /// <param name="others"></param>
-        /// <returns></returns>
-        internal Model.Owid SignWithOthers(
-            Model.Owid owid,
-            Model.Owid[] others)
-        {
-            return SignWithOthers(owid, others, DateTime.UtcNow);
-        }
-
-        /// <summary>
-        /// Sign the OWID provided AND the other OWIDs provided, stamping it
-        /// with the date given rather than the moment of signing.
-        /// </summary>
-        internal Model.Owid SignWithOthers(
-            Model.Owid owid,
-            Model.Owid[] others,
-            DateTime date)
-        {
-            owid.Domain = Domain;
-            owid.Date = ToStampedDate(date);
-            var data = owid.GetDataForCrypto(others);
-            owid.SignatureInternal = Crypto.SignData(
-                data,
-                0,
-                data.Length,
-                HashAlgorithmName.SHA256);
-            if (owid.SignatureInternal.Length != Constants.SignatureLength)
-            {
-                throw new Exception(
-                    $@"Signatures must be '{Constants.SignatureLength}' " +
-                    "bytes");
-            }
-            return owid;
-        }
-
-        /// <summary>
         /// Create a new OWID for the creator containing the value as the 
         /// payload.
         /// </summary>
@@ -180,33 +118,43 @@ namespace Owid.Client
         /// <returns>Signed OWID with payload provided.</returns>
         public Model.Owid Create(byte[] value)
         {
-            return Create(value, Constants.Empty);
+            return Create(value, DateTime.UtcNow);
         }
 
         /// <summary>
-        /// Creates and signs an OWID carrying the value, with the other OWIDs
-        /// covered by the signature so that a tree can be verified as a whole.
+        /// Sign the OWID provided, stamping it with the moment of signing.
         /// </summary>
-        /// <param name="value">Payload value</param>
-        /// <param name="others">
-        /// OWIDs this one is signed alongside.
-        /// </param>
-        /// <returns>Signed OWID with the payload provided.</returns>
-        /// <remarks>
-        /// This is one of only two ways an OWID reaches calling code, the
-        /// other being a successful parse. The creator owns the version, the
-        /// domain, the date and the signature; a caller supplies the payload
-        /// and nothing else, so there is no moment at which a partly built
-        /// OWID exists for anyone to hold or pass on.
-        /// </remarks>
-        public Model.Owid Create(byte[] value, params Model.Owid[] others)
+        internal Model.Owid Sign(Model.Owid owid)
         {
-            return Create(value, DateTime.UtcNow, others);
+            return Sign(owid, DateTime.UtcNow);
         }
 
         /// <summary>
-        /// Creates and signs an OWID carrying the value and the date, with
-        /// the other OWIDs covered by the signature.
+        /// Sign the OWID provided, stamping it with the date given rather
+        /// than the moment of signing. The signature covers the OWID's own
+        /// bytes without the signature field and nothing else.
+        /// </summary>
+        internal Model.Owid Sign(Model.Owid owid, DateTime date)
+        {
+            owid.Domain = Domain;
+            owid.Date = ToStampedDate(date);
+            var data = owid.GetSignedBytes();
+            owid.SignatureInternal = Crypto.SignData(
+                data,
+                0,
+                data.Length,
+                HashAlgorithmName.SHA256);
+            if (owid.SignatureInternal.Length != Constants.SignatureLength)
+            {
+                throw new Exception(
+                    $@"Signatures must be '{Constants.SignatureLength}' " +
+                    "bytes");
+            }
+            return owid;
+        }
+
+        /// <summary>
+        /// Creates and signs an OWID carrying the value and the date.
         /// </summary>
         /// <param name="value">Payload value</param>
         /// <param name="date">
@@ -218,9 +166,6 @@ namespace Owid.Client
         /// format carries, so the OWID in hand states exactly what its bytes
         /// state.
         /// </param>
-        /// <param name="others">
-        /// OWIDs this one is signed alongside.
-        /// </param>
         /// <returns>Signed OWID with the payload and date provided.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
         /// <paramref name="date"/> is before the base date the format counts
@@ -229,8 +174,7 @@ namespace Owid.Client
         /// </exception>
         public Model.Owid Create(
             byte[] value,
-            DateTime date,
-            params Model.Owid[] others)
+            DateTime date)
         {
             if (value == null)
             {
@@ -238,7 +182,7 @@ namespace Owid.Client
             }
             var owid = new Model.Owid();
             owid.PayloadInternal = (byte[])value.Clone();
-            return SignWithOthers(owid, others ?? Constants.Empty, date);
+            return Sign(owid, date);
         }
 
         /// <summary>

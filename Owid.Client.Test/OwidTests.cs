@@ -360,7 +360,7 @@ namespace Owid.Client.Test
         /// line and guards the await on another never catches the failure.
         /// </summary>
         [TestMethod]
-        public void TestVerifyAsyncWithOthersFaultsTheTask()
+        public void TestVerifyAsyncFaultsTheTask()
         {
             var owid = CreateOwid();
 
@@ -369,9 +369,7 @@ namespace Owid.Client.Test
             crypto.ImportFromPem(PublicPEM);
             crypto.Dispose();
 
-            var task = owid.VerifyAsyncWithOthers(
-                crypto,
-                Array.Empty<Model.Owid>());
+            var task = owid.VerifyAsync(crypto);
 
             Assert.IsTrue(task.IsFaulted);
             Assert.IsNotNull(task.Exception);
@@ -423,79 +421,6 @@ namespace Owid.Client.Test
                 crypto.ImportFromPem(PublicPEM);
                 Assert.IsTrue(crypto.VerifyData(
                     signed, owid.Signature, HashAlgorithmName.SHA256));
-            }
-        }
-
-        /// <summary>
-        /// Test that an OWID signed with others verifies when the same others
-        /// are provided to verification.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersVerifiesWithSameOthers()
-        {
-            var others = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsTrue(await owid.VerifyAsync(crypto, others));
-            }
-        }
-
-        /// <summary>
-        /// Test that an OWID signed with others fails verification when the
-        /// others are not provided.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersFailsWithoutOthers()
-        {
-            var others = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsFalse(await owid.VerifyAsync(crypto));
-            }
-        }
-
-        /// <summary>
-        /// Test that an OWID signed with others fails verification when
-        /// different others are provided.
-        /// </summary>
-        [TestMethod]
-        public async Task TestSignWithOthersFailsWithDifferentOthers()
-        {
-            var others = CreateOthers(2);
-            var different = CreateOthers(2);
-            var owid = new Model.Owid();
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                owid.PayloadInternal = Encoding.ASCII.GetBytes(TestText);
-                creator.Sign(owid, others);
-            }
-
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PublicPEM);
-                Assert.IsFalse(await owid.VerifyAsync(crypto, different));
             }
         }
 
@@ -763,21 +688,6 @@ namespace Owid.Client.Test
                 creator.Sign(owid);
             }
             return owid;
-        }
-
-        private Model.Owid[] CreateOthers(int count)
-        {
-            var others = new Model.Owid[count];
-            using (var crypto = ECDsa.Create())
-            {
-                crypto.ImportFromPem(PrivatePEM);
-                var creator = new Creator(TestDomain, crypto);
-                for (var i = 0; i < count; i++)
-                {
-                    others[i] = creator.Create($"Other {Guid.NewGuid()}");
-                }
-            }
-            return others;
         }
 
         internal static DateTime FloorToMinute(DateTime date)

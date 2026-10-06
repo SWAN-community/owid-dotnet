@@ -33,7 +33,6 @@ namespace Owid.Client.Controllers
     [ApiController]
     public class OwidController : Controller
     {
-        private readonly OwidConfiguration _owidConfiguration;
         private readonly IPublicKeyStore _publicKeyStore;
         private readonly IOwidAuthorizer? _authorizer;
 
@@ -60,7 +59,6 @@ namespace Owid.Client.Controllers
             IPublicKeyStore? publicKeyStore = null,
             IOwidAuthorizer? authorizer = null)
         {
-            _owidConfiguration = owidConfiguration;
             _publicKeyStore = publicKeyStore
                 ?? new ConfigurationPublicKeyStore(owidConfiguration);
             _authorizer = authorizer;
@@ -88,32 +86,52 @@ namespace Owid.Client.Controllers
         }
 
         /// <summary>
-        /// Returns the public key for the OWID creator. With a date, returns
-        /// the key in force at that date; without one, the key in force now.
-        /// A date later than the moment of the request is read as that
-        /// moment.
+        /// Returns the public key for the OWID creator as a
+        /// <see cref="PublicKeyResponse"/>, being the key and the moments it
+        /// is valid from and to where the store knows them. With a date,
+        /// returns the key in force at that date; without one, the key in
+        /// force now. A date later than the moment of the request is read as
+        /// that moment. The answer is checked before it is sent, and a store
+        /// whose key cannot be read or whose schedule contradicts itself is
+        /// reported as a server error rather than passed on.
         /// </summary>
         /// <param name="date">
         /// Optional date as minutes since 2020-01-01 UTC (the OWID date
-        /// encoding).
+        /// encoding), being the minute the key is asked for.
+        /// </param>
+        /// <param name="format">
+        /// Optional encoding of the key in the answer. The only value
+        /// defined is spki, which is taken when the parameter is absent, and
+        /// any other value is answered 400.
         /// </param>
         /// <returns>
-        /// The public key, or 404 when no key was active at the requested date.
+        /// The public key answer, 400 for a format this creator does not
+        /// serve, or 404 when no key was active at the requested date.
         /// </returns>
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         [HttpGet("public-key")]
         [HttpPost("public-key")]
-        public async Task<ActionResult<string?>> GetPublicKey(uint? date = null)
+        public async Task<ActionResult<PublicKeyResponse>> GetPublicKey(
+            uint? date = null,
+            string? format = null)
         {
             var denied = await AuthorizeAsync();
             if (denied != null)
             {
                 return denied;
             }
-            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
+            if (format != null && format != PublicKeyResponse.SpkiFormat)
+            {
+                return BadRequest(
+                    "the only format defined is " + PublicKeyResponse.SpkiFormat);
+            }
+            var asked = ClampToNow(date);
+            var period = _publicKeyStore.GetPublicKeyPeriod(asked);
+            var key = period?.PublicKey ?? _publicKeyStore.GetPublicKey(asked);
             if (key == null)
             {
                 // Nothing is in force at the requested moment, which for an
@@ -122,49 +140,25 @@ namespace Owid.Client.Controllers
                 // never reads a missing key as a key.
                 return NotFound();
             }
-            return key;
+            try
+            {
+                return PublicKeyResponse.For(key, period, asked ?? NowMinutes());
+            }
+            catch (InvalidOperationException e)
+            {
+                // The store answered with something a client would refuse,
+                // which is this creator's fault and not the caller's.
+                return StatusCode(StatusCodes.Status500InternalServerError, e.Message);
+            }
         }
 
-
         /// <summary>
-        /// Returns the creator domain and signing public key. With a date,
-        /// returns the key in force at that date; without one, the key in
-        /// force now, and a date later than the moment of the request is read
-        /// as that moment. This matches the public-key end point so the two
-        /// agree.
+        /// Now as minutes since the base date.
         /// </summary>
-        /// <param name="date">
-        /// Optional date as minutes since 2020-01-01 UTC (the OWID date
-        /// encoding).
-        /// </param>
-        /// <returns>
-        /// The creator info, or 404 when no key was active at the requested
-        /// date.
-        /// </returns>
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [HttpGet("creator")]
-        [HttpPost("creator")]
-        public async Task<ActionResult<CreatorResponse>> GetCreator(
-            uint? date = null)
+        private static uint NowMinutes()
         {
-            var denied = await AuthorizeAsync();
-            if (denied != null)
-            {
-                return denied;
-            }
-            var key = _publicKeyStore.GetPublicKey(ClampToNow(date));
-            if (key == null)
-            {
-                return NotFound();
-            }
-            return new CreatorResponse
-            {
-                Domain = _owidConfiguration.Domain,
-                PublicKeySPKI = key,
-            };
+            var minutes = (DateTime.UtcNow - OwidBaseDate).TotalMinutes;
+            return minutes >= uint.MaxValue ? uint.MaxValue : (uint)minutes;
         }
 
         private Task<ActionResult?> AuthorizeAsync() =>

@@ -52,16 +52,12 @@ namespace Owid.Client.Model
     /// that precedes every key yields null.
     /// </summary>
     /// <remarks>
-    /// Selection used to run on the moment each key was generated, which was
-    /// a fair stand-in whilst keys were generated one per week, so the order
-    /// of generation matched the order of the schedule. It stopped being one
-    /// on 1 September 2026, when a 51Degrees creator wrote thirteen keys in a
-    /// single run. All thirteen shared one moment of generation whilst their
-    /// start dates ran forward a week at a time, so an identifier dated
-    /// 4 September 2026 selected the key that starts on 7 September and the
-    /// signature came back as invalid. Invalid is the answer that means
-    /// forgery, so genuine identifiers were rejected as forged. The published
-    /// schedule and one of those identifiers are the fixture behind
+    /// Selection runs on the schedule position of each key and not on the
+    /// moment its material was generated. A creator may write many weeks of
+    /// keys in one run, so the moment of generation says nothing about which
+    /// key signed an identifier, and selecting on it picks a key whose period
+    /// has not started and reports genuine identifiers as forged. The published
+    /// schedule and an identifier signed under it are the fixture behind
     /// PublishedScheduleTests.
     /// </remarks>
     public class DatedKeyStore : IPublicKeyStore
@@ -105,5 +101,59 @@ namespace Owid.Client.Model
 
         private string? InForceAt(DateTime at) => _keysLatestFirst
             .FirstOrDefault(k => k.StartsAt <= at)?.PublicKey;
+
+        /// <inheritdoc/>
+        public PublicKeyPeriod? GetPublicKeyPeriod(uint? dateMinutes)
+        {
+            var at = dateMinutes == null
+                ? DateTime.UtcNow
+                : dateMinutes.Value > Constants.MaximumMinutes
+                    ? DateTime.MaxValue
+                    : Constants.BaseDate.AddMinutes(dateMinutes.Value);
+            var index = -1;
+            for (var i = 0; i < _keysLatestFirst.Count; i++)
+            {
+                if (_keysLatestFirst[i].StartsAt <= at)
+                {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0 || _keysLatestFirst[index].PublicKey == null)
+            {
+                return null;
+            }
+            var key = _keysLatestFirst[index];
+            // The span runs to the earliest later start, which is the
+            // nearest key before this one in the latest first order that
+            // does not share this one's start.
+            DateTime? next = null;
+            for (var i = index - 1; i >= 0; i--)
+            {
+                if (_keysLatestFirst[i].StartsAt > key.StartsAt)
+                {
+                    next = _keysLatestFirst[i].StartsAt;
+                    break;
+                }
+            }
+            return new PublicKeyPeriod(
+                key.PublicKey!,
+                Minutes(key.StartsAt),
+                next == null ? null : Minutes(next.Value));
+        }
+
+        /// <summary>
+        /// The moment as minutes since the base date, clamped to the count
+        /// the OWID date can hold.
+        /// </summary>
+        private static uint Minutes(DateTime at)
+        {
+            if (at <= Constants.BaseDate)
+            {
+                return 0;
+            }
+            var minutes = (at - Constants.BaseDate).TotalMinutes;
+            return minutes >= uint.MaxValue ? uint.MaxValue : (uint)minutes;
+        }
     }
 }

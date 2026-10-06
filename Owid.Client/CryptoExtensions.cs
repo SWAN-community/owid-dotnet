@@ -264,7 +264,18 @@ namespace Owid.Client
 			// Completes synchronously. Verification is a short CPU-bound
 			// operation, so queuing it to the thread pool would cost a
 			// thread and a hop for nothing.
-			return Task.FromResult(owid.Verify(crypto));
+			try
+			{
+				return Task.FromResult(owid.Verify(crypto));
+			}
+			catch (Exception exception)
+			{
+				// Running on the caller's thread would otherwise raise the
+				// failure before the task exists, so a caller that starts the
+				// verification on one line and guards the await on another
+				// would never catch it.
+				return Task.FromException<bool>(exception);
+			}
 		}
 
         /// <summary>
